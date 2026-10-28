@@ -83,7 +83,7 @@ test('Token 错误时给出中文提示', async () => {
   const gh = fakeGitHub();
   await assert.rejects(
     S.sync(Object.assign({}, cfg, { token: 'bad' }), C.emptyState(), merge, str, gh.fetchImpl),
-    /Token 无效/
+    /GitHub 不认这个 Token/
   );
 });
 

@@ -1318,7 +1318,25 @@
         persistLine));
   };
 
+  // GitHub tokens look like github_pat_… (fine-grained, ~90 chars) or ghp_…; catch pasted names or partial copies early.
+  function tokenProblem(token) {
+    const t = String(token || '').replace(/\s+/g, '');
+    if (!t) return '';
+    if (/^(github_pat_|ghp_|gho_|ghu_)[A-Za-z0-9_]{20,}$/.test(t)) return '';
+    return '粘贴的内容不像 Token（只有 ' + t.length + ' 个字符）。Token 以 github_pat_ 开头，大约 90 个字符，只在生成后显示一次。'
+      + (/^speak-loop/i.test(t) ? '你粘贴的是 Token 的名称，不是 Token 本身。' : '请回到 GitHub 生成页面，点那串长字符旁边的复制按钮再粘贴。');
+  }
+
   async function saveSyncConfig(fields) {
+    fields.token = String(fields.token || '').replace(/\s+/g, '');
+    const problem = tokenProblem(fields.token);
+    if (problem) {
+      device.sync.lastError = problem;
+      device.sync.status = 'error';
+      render();
+      toast(problem, 'error');
+      return;
+    }
     Object.assign(device.sync, fields);
     device.sync.lastError = '';
     device.sync.status = Sync.isConfigured(device.sync) ? 'ok' : 'off';
