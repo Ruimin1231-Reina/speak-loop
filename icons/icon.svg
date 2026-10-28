@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="口语工作台">
+  <rect width="512" height="512" rx="112" fill="#1F4E5F"/>
+  <path d="M176 128h160a64 64 0 0 1 64 64v88a64 64 0 0 1-64 64h-92l-62 50v-50h-6a64 64 0 0 1-64-64v-88a64 64 0 0 1 64-64z" fill="#F7F1E4"/>
+  <path d="M285 186A58 58 0 1 1 206 207" fill="none" stroke="#D9623B" stroke-width="26" stroke-linecap="round"/>
+  <path d="M219 182 222 217 189 199z" fill="#D9623B" stroke="#D9623B" stroke-width="8" stroke-linejoin="round"/>
+</svg>

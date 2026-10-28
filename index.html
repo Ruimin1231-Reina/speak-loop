@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>口语工作台 · Speak Loop</title>
+  <meta name="description" content="把 ChatGPT Live 的对话变成能复习、能再说出来的英语。">
+  <meta name="theme-color" content="#F7F4EE" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#121A1D" media="(prefers-color-scheme: dark)">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="口语工作台">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">跳到主要内容</a>
+  <div class="shell">
+    <nav class="nav" id="nav" aria-label="主导航"></nav>
+    <main class="main" id="main" tabindex="-1">
+      <p class="loading">正在加载…</p>
+    </main>
+  </div>
+  <div class="toast-wrap" id="toast" aria-live="polite"></div>
+  <dialog class="dialog" id="dialog"></dialog>
+  <noscript><p class="loading">需要开启 JavaScript 才能使用口语工作台。</p></noscript>
+
+  <script src="core.js"></script>
+  <script src="prompts.js"></script>
+  <script src="sample-pack.js"></script>
+  <script src="storage.js"></script>
+  <script src="speech.js"></script>
+  <script src="sync.js"></script>
+  <script src="ui.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
