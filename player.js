@@ -75,6 +75,8 @@
       };
       // 系统没让开始朗读（比如从后台回来后需要再点一下），就停下来提示
       watchdog = setTimeout(() => {
+        // 有的浏览器不触发 onstart，只要正在出声就算开始了
+        if (synth.speaking) started = true;
         if (my === token && !started && st.playing) {
           st.playing = false;
           st.stalled = true;

@@ -172,12 +172,17 @@ function check(name, ok, detail) { results.push({ name, ok: !!ok, detail }); con
   await sleep(400);
   check('讲顺后安排 2 天后再讲', (await text()).includes('复述：2天后讲'));
 
-  // 4d. 听力页：连续循环播放 + 散步模式
+  // 4d. 听力页：连续循环播放 + 散步模式（先刷新，模拟刚打开 App 直接来听力页）
   await page.goto(BASE + '#/listen', { waitUntil: 'networkidle0' });
-  await sleep(300);
+  await page.reload({ waitUntil: 'networkidle0' });
+  await sleep(400);
   check('听力页列出故事', (await text()).includes('A low-key weekend'));
+  check('开始前没有播放面板', !(await page.$('#np-card')));
   await page.click('#play-list');
-  await sleep(3200);
+  await sleep(300);
+  const npLabel = await page.$eval('#np-card [data-np="toggle"]', b => b.textContent).catch(() => '(没有播放面板)');
+  check('点「开始连续播放」后出现暂停键', npLabel.includes('暂停'), npLabel);
+  await sleep(2900);
   const listens = await page.evaluate(() => Object.values(window.__speakLoop.getState().stories)[0].listens);
   check('循环播放：听完一遍会记一次', listens >= 1, String(listens));
   await clickText('button', '散步模式');

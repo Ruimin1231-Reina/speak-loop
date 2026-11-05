@@ -16,7 +16,7 @@
 
   const APP_VERSION = '1.0.0';
   // 和 sw.js 的 CACHE 版本号保持一致，方便确认手机上是不是最新版
-  const APP_BUILD = 'v10 · 2026-11-05';
+  const APP_BUILD = 'v11 · 2026-11-05';
   const $main = document.getElementById('main');
   const $nav = document.getElementById('nav');
   const WEEK = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
@@ -1556,12 +1556,19 @@
     const pieces = ctx.ids.map(storyById).filter(Boolean).map(st => storyPiece(st, ctx.version));
     if (!pieces.length) { toast('没有可以播放的内容'); return; }
     if (!window.SLPlayer.canSpeak()) { toast('这个浏览器不支持朗读', 'error'); return; }
+    const first = !ui.playing || ui.playing.kind !== ctx.kind;
     ui.playing = ctx;
     player.load(pieces, pieceIndex || 0, sentIndex || 0);
     player.setRate(listenRate());
     player.setMode(ui.listen.mode);
     player.setLoop(ctx.kind === 'list' ? ui.listen.loop : !!ctx.loop);
     player.play();
+    // 重画页面，让播放面板（暂停、上一句、下一句、散步模式）出现
+    render();
+    if (first && ctx.kind === 'list') {
+      const card = document.getElementById('np-card');
+      if (card) card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
   }
   function isPlayingCtx(kind, id) {
     const p = ui.playing;
@@ -1903,7 +1910,7 @@
           class: 'btn btn-primary btn-block btn-lg', type: 'button', id: 'play-list', disabled: !chosen.length,
           onclick: () => startPlayback({ kind: 'list', ids: chosen.map(s => s.id), version: ui.listen.version }, 0, 0)
         }, icon('play', 20), chosen.length ? '开始连续播放（' + chosen.length + ' 篇，' + minutesLabel(words, listenRate()) + '）' : '先勾选要听的内容')),
-      ui.playing ? h('div', { class: 'card' },
+      ui.playing ? h('div', { class: 'card', id: 'np-card' },
         playerControls({
           showText: true, loopToggle: 'np', loopValue: player.state().loop,
           onLoop: v => { player.setLoop(v); if (ui.playing.kind === 'list') ui.listen.loop = v; },
