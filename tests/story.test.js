@@ -137,6 +137,8 @@ test('highlightRanges: 词形变化、占位词、弯引号、重叠合并', () 
   assert.deepEqual(show(C.highlightRanges(text, ['distinguish between A and B'])), ['distinguished between']);
   assert.deepEqual(show(C.highlightRanges(text, ['the court', 'court ruled'])), ['The court ruled']);
   assert.deepEqual(C.highlightRanges(text, ['banana split']), []);
+  const t2 = 'After the first-instance judgment came out, I appealed.';
+  assert.deepEqual(C.highlightRanges(t2, ['a first-instance judgment']).map(([a, b]) => t2.slice(a, b)), ['the first-instance judgment'], '开头的冠词不同也能高亮');
 });
 
 test('mergeStates 合并故事；migrateState 清理坏的故事', () => {

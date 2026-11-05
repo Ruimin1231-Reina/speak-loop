@@ -670,8 +670,10 @@
         .map(c => c.replace(/[.,!?;:"“”]+/g, ' ').trim())
         .filter(c => c.split(/\s+/).length >= 2 || c.length >= 5);
       for (const chunk of chunks) {
-        const words = chunk.split(/\s+/).filter(Boolean);
-        const pattern = words.map((w, i) => {
+        // 开头的 a/an/the 可有可无：「a first-instance judgment」也能高亮「the first-instance judgment」
+        const art = /^(?:a|an|the)\s+(?=\S)/i.test(chunk) && chunk.split(/\s+/).length > 1;
+        const words = (art ? chunk.replace(/^(?:a|an|the)\s+/i, '') : chunk).split(/\s+/).filter(Boolean);
+        const pattern = (art ? '(?:(?:a|an|the)\\s+)?' : '') + words.map((w, i) => {
           let p = w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/'/g, "['’]");
           if ((i === 0 || i === words.length - 1) && /^[A-Za-z-]{4,}$/.test(w)) p += '[a-z]*';
           return p;
