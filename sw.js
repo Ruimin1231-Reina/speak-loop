@@ -3,7 +3,7 @@
  * 离线缓存：没网时也能打开和复习。改了任何文件后，把 CACHE 的版本号 +1，用户下次打开就会更新。
  * 学习数据在 IndexedDB 里，不受缓存影响。
  */
-const CACHE = 'speak-loop-v5';
+const CACHE = 'speak-loop-v6';
 const ASSETS = [
   './',
   './index.html',
@@ -15,6 +15,7 @@ const ASSETS = [
   './speech.js',
   './sync.js',
   './ui.js',
+  './player.js',
   './app.js',
   './manifest.webmanifest',
   './icons/icon.svg',

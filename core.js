@@ -140,7 +140,7 @@
     return { name: '', newPerDay: 15, reviewsPerDay: 100, showZh: true, aboutMe: '', updatedAt: 0 };
   }
   function emptyState() {
-    return { version: 1, items: {}, packs: {}, activity: {}, settings: defaultSettings() };
+    return { version: 1, items: {}, packs: {}, stories: {}, activity: {}, settings: defaultSettings() };
   }
   function newSrs() {
     return { state: 'new', due: 0, interval: 0, ease: 2.5, reps: 0, lapses: 0, last: 0, first: 0 };
@@ -173,6 +173,20 @@
       p.next_steps_zh = Array.isArray(p.next_steps_zh) ? p.next_steps_zh : [];
       p.revision = p.revision >= 1 ? p.revision : 1;
       if (!p.updatedAt) p.updatedAt = p.importedAt || 0;
+    }
+    out.stories = isObj(s.stories) ? s.stories : {};
+    for (const id of Object.keys(out.stories)) {
+      const st = out.stories[id];
+      if (!isObj(st) || !Array.isArray(st.full) || !st.full.length) { delete out.stories[id]; continue; }
+      st.id = st.id || id;
+      st.kind = st.kind === 'diary' ? 'diary' : 'story';
+      st.title = st.title || '未命名的故事';
+      for (const k of ['short', 'outline', 'topics']) st[k] = Array.isArray(st[k]) ? st[k] : [];
+      if (!['active', 'removed'].includes(st.status)) st.status = 'active';
+      st.retell = Object.assign(newRetell(st.createdAt || 0), isObj(st.retell) ? st.retell : {});
+      st.listens = st.listens > 0 ? st.listens : 0;
+      if (!st.createdAt) st.createdAt = 0;
+      if (!st.updatedAt) st.updatedAt = st.createdAt || 0;
     }
     return out;
   }
@@ -317,6 +331,67 @@
     }).filter(x => x && x.sentence).slice(0, 8);
   }
 
+  // ---------- 故事（第一人称复述）与说法升级 ----------
+  // Paragraphs may arrive as an array or as one string separated by blank lines.
+  function toParagraphs(v, maxParas, maxLen) {
+    let list = [];
+    if (Array.isArray(v)) list = v;
+    else if (typeof v === 'string') list = v.split(/\n\s*\n/);
+    else if (isObj(v)) list = Object.values(v);
+    return list
+      .map(p => (typeof p === 'string' ? p : isObj(p) ? pick(p, ['text', 'paragraph', 'content']) : ''))
+      .map(p => clean(p, maxLen))
+      .filter(Boolean)
+      .slice(0, maxParas);
+  }
+
+  function normStory(v, fallbackTitle) {
+    if (typeof v === 'string') v = { full: v };
+    if (!isObj(v)) return null;
+    const full = toParagraphs(pick(v, ['full', 'full_text', 'paragraphs', 'text', 'body', 'long', 'long_version', 'story']), 40, 2000);
+    if (!full.length) return null;
+    const kindRaw = clean(pick(v, ['kind', 'type']), 20);
+    return {
+      kind: /diary|journal|日记/i.test(kindRaw) ? 'diary' : 'story',
+      title: clean(pick(v, ['title', 'name']), 120) || fallbackTitle || '未命名的故事',
+      topics: toStrList(pick(v, ['topics', 'tags']), 8, 40),
+      full,
+      short: toParagraphs(pick(v, ['short', 'short_version', 'one_minute', 'short_text']), 10, 2000),
+      outline: toStrList(pick(v, ['outline', 'beats', 'key_points', 'plan']), 10, 200,
+        x => (isObj(x) ? pick(x, ['text', 'beat', 'point', 'cue']) : x))
+    };
+  }
+
+  function normKeySentence(v) {
+    if (typeof v === 'string') v = { sentence: v };
+    if (!isObj(v)) return { error: '格式不对' };
+    const sentence = clean(pick(v, ['sentence', 'text', 'term', 'line']), 400);
+    if (!sentence) return { error: '缺少 sentence（句子本身）' };
+    return {
+      item: {
+        kind: 'expr', form: 'sentence', term: sentence, pos: '',
+        cue: clean(pick(v, ['cue', 'hint', 'prompt', 'meaning_en']), 200),
+        meaning_en: '', meaning_zh: clean(pick(v, ['meaning_zh', 'zh']), 200),
+        usage: '', example: '', context: ''
+      }
+    };
+  }
+
+  function normUpgrade(v) {
+    if (!isObj(v)) return { error: '格式不对' };
+    const basic = clean(pick(v, ['basic', 'plain', 'from', 'original', 'before']), 400);
+    const better = clean(pick(v, ['better', 'precise', 'to', 'upgrade', 'after', 'natural']), 400);
+    if (!basic || !better) return { error: '缺少 basic 或 better' };
+    return {
+      item: {
+        kind: 'fix', form: 'upgrade', original: basic, corrected: better, natural: '',
+        why_zh: clean(pick(v, ['why_zh', 'why', 'note', 'reason']), 300),
+        type: normalizeType(pick(v, ['type', 'category']) || 'word_choice'),
+        focus: clean(pick(v, ['focus', 'chunk', 'key_point']), 140)
+      }
+    };
+  }
+
   function normalizePack(raw, opts) {
     const now = (opts && opts.now) || Date.now();
     const warnings = [];
@@ -363,11 +438,29 @@
         else items.push(r.item);
       });
     }
+
+    const storyRaw = pick(raw, ['story', 'diary', 'narrative', 'retelling']);
+    const story = normStory(storyRaw, pack.title);
+    if (storyRaw != null && !story) warnings.push('故事缺少正文（full），已跳过');
+    if (story && !story.topics.length) story.topics = pack.topics.slice();
+    const keySentences = isObj(storyRaw) ? asArray(pick(storyRaw, ['key_sentences', 'keySentences', 'anchors', 'key_lines'])) : [];
+    keySentences.forEach((v, i) => {
+      const r = normKeySentence(v);
+      if (r.error) warnings.push('关键句第 ' + (i + 1) + ' 条' + r.error + '，已跳过');
+      else items.push(r.item);
+    });
+    const upgradesRaw = asArray(pick(raw, ['upgrades', 'better_ways'])).concat(isObj(storyRaw) ? asArray(pick(storyRaw, ['upgrades'])) : []);
+    upgradesRaw.forEach((v, i) => {
+      const r = normUpgrade(v);
+      if (r.error) warnings.push('说法升级第 ' + (i + 1) + ' 条' + r.error + '，已跳过');
+      else items.push(r.item);
+    });
+
     const errors = [];
-    if (!items.length) {
-      errors.push('没有可导入的单词、表达或纠错内容。这个 Pack 可以保留作聊天复盘，但目前没有可进入复习的素材；请补充真实对话中值得练的内容，或直接跳过导入。');
+    if (!items.length && !story) {
+      errors.push('没有可导入的单词、表达、纠错或故事。这个 Pack 可以保留作聊天复盘，但目前没有可练的素材；请补充真实对话中值得练的内容，或直接跳过导入。');
     }
-    return { pack, items, warnings, errors };
+    return { pack, items, story, warnings, errors };
   }
 
   function parsePackText(text, opts) {
@@ -447,8 +540,159 @@
       updatedAt: now,
       deleted: false
     });
+    let storyId = null;
+    if (draft.story && draft._storyDecision !== 'skip') {
+      if (!state.stories) state.stories = {};
+      storyId = uid('st');
+      const old = draft._storyDup ? state.stories[draft._storyDup] : null;
+      state.stories[storyId] = Object.assign(stripPrivate(clone(draft.story)), {
+        id: storyId,
+        packId,
+        date: draft.pack.date,
+        status: 'active',
+        retell: old ? clone(old.retell) : newRetell(now),
+        listens: old ? old.listens || 0 : 0,
+        createdAt: now,
+        updatedAt: now
+      });
+      if (old) { old.status = 'removed'; old.updatedAt = now; }
+      state.packs[packId].storyId = storyId;
+    }
     recordActivity(state, deviceId, dateKey(now), 'i', 1);
-    return { packId, revision, active, saved, skipped: draft.items.length - keep.length };
+    return { packId, storyId, revision, active, saved, skipped: draft.items.length - keep.length };
+  }
+
+  // 同一天、同标题的故事视为同一个（重新生成时替换旧的，保留复述进度）
+  function findStoryDuplicate(state, story, date) {
+    if (!story) return null;
+    const key = normalizeText(story.title);
+    const hit = Object.values(state.stories || {}).find(s =>
+      s && s.status !== 'removed' && s.date === date && normalizeText(s.title) === key);
+    return hit ? hit.id : null;
+  }
+
+  // ---------- 故事复述的间隔 ----------
+  // 第 n 次讲顺之后，隔 RETELL_GAPS[n] 天再讲：导入后第 2 天讲第一次，之后约第 4、8、20、50 天……
+  const RETELL_GAPS = [2, 4, 12, 30, 60, 90];
+  function newRetell(now) {
+    return { step: 0, due: addDaysTs(startOfDay(now || 0), 1), reps: 0, lapses: 0, last: 0 };
+  }
+  function scheduleRetell(retell, smooth, now) {
+    const r = Object.assign(newRetell(now), retell);
+    r.reps += 1;
+    r.last = now;
+    if (smooth) {
+      r.due = addDaysTs(startOfDay(now), RETELL_GAPS[Math.min(r.step, RETELL_GAPS.length - 1)]);
+      r.step = Math.min(r.step + 1, RETELL_GAPS.length);
+    } else {
+      r.lapses += 1;
+      r.step = Math.max(0, r.step - 1);
+      r.due = addDaysTs(startOfDay(now), 1);
+    }
+    return r;
+  }
+  function applyRetell(state, storyId, smooth, opts) {
+    const now = (opts && opts.now) || Date.now();
+    const st = state.stories && state.stories[storyId];
+    if (!st) return null;
+    st.retell = scheduleRetell(st.retell, smooth, now);
+    st.updatedAt = now;
+    recordActivity(state, (opts && opts.deviceId) || 'local', dateKey(now), 'r', 1);
+    return st.retell;
+  }
+  // 提示越来越少：前两次给提纲和关键表达，之后只给提纲，熟了只给标题
+  function retellCueLevel(step) {
+    if (step <= 1) return 'outline+terms';
+    if (step <= 3) return 'outline';
+    return 'title';
+  }
+  function retellVersion(story) {
+    return story.retell.step === 0 && story.short && story.short.length ? 'short' : 'full';
+  }
+  function activeStories(state) {
+    return Object.values(state.stories || {})
+      .filter(s => s && s.status === 'active')
+      .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0) || b.createdAt - a.createdAt);
+  }
+  function storiesDue(state, now) {
+    const eod = endOfDay(now);
+    return activeStories(state).filter(s => s.retell.due <= eod).sort((a, b) => a.retell.due - b.retell.due);
+  }
+  function storyDueLabel(story, now) {
+    const days = Math.round((startOfDay(story.retell.due) - startOfDay(now)) / DAY);
+    if (days <= 0) return '今天讲';
+    if (days === 1) return '明天讲';
+    return days + '天后讲';
+  }
+  // 复述时要用上的关键表达：同一份 Pack 里的单词、表达和说法升级（不含关键句本身）
+  function storyTerms(state, story) {
+    return packItems(state, story.packId)
+      .filter(i => (i.kind === 'vocab' || i.kind === 'expr') && i.form !== 'sentence')
+      .map(i => i.term)
+      .concat(packItems(state, story.packId).filter(i => i.form === 'upgrade').map(i => i.corrected))
+      .filter(Boolean);
+  }
+
+  // ---------- 分句与高亮（听力播放用） ----------
+  const ABBREV = /(?:^|\s)(?:Mr|Mrs|Ms|Dr|Prof|Sr|Jr|St|vs|etc|No|e\.g|i\.e|U\.S|U\.K|a\.m|p\.m)\.$/i;
+  function splitSentences(text) {
+    const s = clean(text, 20000);
+    if (!s) return [];
+    const out = [];
+    const re = /[.!?…]+["'”’)\]]*\s+/g;
+    let start = 0;
+    let m;
+    while ((m = re.exec(s))) {
+      const end = m.index + m[0].length;
+      const head = s.slice(start, m.index + 1);
+      if (ABBREV.test(head) || /[a-z0-9]/.test(s[end] || '')) continue;
+      const chunk = s.slice(start, end).trim();
+      if (chunk) out.push(chunk);
+      start = end;
+    }
+    const rest = s.slice(start).trim();
+    if (rest) out.push(rest);
+    return out;
+  }
+  function storyParagraphs(story, version) {
+    const v = version === 'short' && story.short && story.short.length ? story.short : story.full;
+    return v.map(p => splitSentences(p));
+  }
+  function wordCount(text) { return (clean(text, 50000).match(/[A-Za-z0-9'’-]+/g) || []).length; }
+
+  // 返回 text 里 terms 出现的位置 [[start, end], ...]；占位词（...、sth、A/B）会被拆开分别匹配
+  function highlightRanges(text, terms) {
+    const ranges = [];
+    const src = String(text || '');
+    for (const term of terms || []) {
+      const chunks = clean(term, 300)
+        .split(/\.\.\.|…|\b(?:someone['’]s|somebody['’]s|one['’]s|something|somebody|someone|sth|sb)(?![A-Za-z])|\b[AB]\b/)
+        .map(c => c.replace(/[.,!?;:"“”]+/g, ' ').trim())
+        .filter(c => c.split(/\s+/).length >= 2 || c.length >= 5);
+      for (const chunk of chunks) {
+        const words = chunk.split(/\s+/).filter(Boolean);
+        const pattern = words.map((w, i) => {
+          let p = w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/'/g, "['’]");
+          if ((i === 0 || i === words.length - 1) && /^[A-Za-z-]{4,}$/.test(w)) p += '[a-z]*';
+          return p;
+        }).join('[\\s,]+');
+        const re = new RegExp('(^|[^A-Za-z])(' + pattern + ')(?![A-Za-z])', 'gi');
+        let m;
+        while ((m = re.exec(src))) {
+          const start = m.index + m[1].length;
+          ranges.push([start, start + m[2].length]);
+          if (re.lastIndex === m.index) re.lastIndex++;
+        }
+      }
+    }
+    ranges.sort((a, b) => a[0] - b[0] || b[1] - a[1]);
+    const merged = [];
+    for (const r of ranges) {
+      const last = merged[merged.length - 1];
+      if (last && r[0] < last[1]) last[1] = Math.max(last[1], r[1]);
+      else merged.push(r.slice());
+    }
+    return merged;
   }
 
   // ---------- 复习调度（简化版 SM-2） ----------
@@ -586,19 +830,21 @@
     const c = d[deviceId] || (d[deviceId] = { r: 0, i: 0 });
     c[field] = (c[field] || 0) + inc;
   }
+  // r = 复习/复述次数，i = 导入次数，l = 听完的篇数
   function dayTotals(state, day) {
-    const out = { r: 0, i: 0 };
+    const out = { r: 0, i: 0, l: 0 };
     const d = state.activity[day];
     if (!d) return out;
     for (const dev of Object.keys(d)) {
       out.r += d[dev].r || 0;
       out.i += d[dev].i || 0;
+      out.l += d[dev].l || 0;
     }
     return out;
   }
   function isActiveDay(state, day) {
     const t = dayTotals(state, day);
-    return t.r + t.i > 0;
+    return t.r + t.i + t.l > 0;
   }
   function streak(state, now) {
     const today = isActiveDay(state, dateKey(now));
@@ -627,9 +873,9 @@
       if (ts > end) { cells.push(null); continue; }
       const day = dateKey(ts);
       const t = dayTotals(state, day);
-      const v = t.r + t.i * 5;
+      const v = t.r + t.i * 5 + t.l * 3;
       if (v > 0) activeDays++;
-      cells.push({ day, reviews: t.r, imports: t.i, level: v === 0 ? 0 : v < 10 ? 1 : v < 25 ? 2 : v < 50 ? 3 : 4 });
+      cells.push({ day, reviews: t.r, imports: t.i, listens: t.l, level: v === 0 ? 0 : v < 10 ? 1 : v < 25 ? 2 : v < 50 ? 3 : 4 });
     }
     return { weeks, cells, activeDays };
   }
@@ -649,7 +895,8 @@
     }
     let wins = 0;
     for (const p of Object.values(state.packs)) if (p && !p.deleted) wins += (p.went_well || []).length;
-    return { active, saved, mastered, wins, byKind };
+    const stories = activeStories(state).length;
+    return { active, saved, mastered, wins, stories, byKind };
   }
   function errorTypeStats(state) {
     const counts = {};
@@ -881,6 +1128,7 @@
       version: 1,
       items: mergeMaps(a.items, b.items),
       packs: mergeMaps(a.packs, b.packs),
+      stories: mergeMaps(a.stories, b.stories),
       activity: mergeActivity(a.activity, b.activity),
       settings: clone(pickNewer(a.settings, b.settings))
     };
@@ -898,6 +1146,8 @@
     recordActivity, dayTotals, streak, reviewsInLastDays, heatmapData, libraryStats, errorTypeStats,
     latestPack, packsByDate, packItems, scoreSeries, pickTargets, buildOpener,
     hintPattern, blankExample, matchSpoken,
+    findStoryDuplicate, RETELL_GAPS, newRetell, scheduleRetell, applyRetell, retellCueLevel, retellVersion,
+    activeStories, storiesDue, storyDueLabel, storyTerms, splitSentences, storyParagraphs, wordCount, highlightRanges,
     stableStringify, mergeStates
   };
   root.SLCore = api;

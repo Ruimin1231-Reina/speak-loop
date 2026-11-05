@@ -37,7 +37,12 @@
     libKind: 'vocab',
     libFilter: 'all',
     libQuery: '',
-    focusAfter: null
+    focusAfter: null,
+    // 听力：播放设置、当前播放内容、散步模式
+    listen: { version: 'full', mode: 'read', loop: true, rate: 0, filter: 'all', exclude: {}, follow: true },
+    playing: null,
+    storyTab: 'full',
+    walk: false
   };
   let syncing = false;
   let syncTimer = null;
@@ -129,6 +134,7 @@
   const NAV = [
     ['today', '今天', 'home'],
     ['review', '复习', 'review'],
+    ['listen', '听力', 'headphones'],
     ['packs', '日报', 'packs'],
     ['library', '素材库', 'library'],
     ['settings', '设置', 'settings']
@@ -143,7 +149,7 @@
       h('div', { class: 'nav-foot' }, syncLine()));
   }
   function updateNav(name) {
-    const active = { pack: 'packs', import: 'packs', guide: 'settings' }[name] || name;
+    const active = { pack: 'packs', import: 'packs', guide: 'settings', story: 'listen', retell: 'listen' }[name] || name;
     const due = C.countByTrack(state, Date.now()).all.total;
     $nav.querySelectorAll('.nav-link').forEach(a => {
       if (a.dataset.route === active) a.setAttribute('aria-current', 'page');
@@ -184,6 +190,9 @@
     }
     $main.replaceChildren(node);
     updateNav(r.name);
+    // 离开听力相关页面时停下朗读，免得和复习里的发音互相打断
+    if (!['listen', 'story', 'retell'].includes(r.name) && player.state().playing && !ui.walk) player.pause();
+    refreshPlayerUi();
     if (changed) {
       window.scrollTo(0, 0);
       const h1 = $main.querySelector('h1');
@@ -232,6 +241,19 @@
   }
 
   function itemSummary(it) {
+    if (it.form === 'sentence') {
+      return h('div', { class: 'item-sum' },
+        h('p', { class: 'fix-line' }, h('span', { class: 'tag tag-star', text: '关键句' }), h('span', { class: 'en', text: it.term }), speakBtn(it.term)),
+        it.cue ? h('p', { class: 'small muted', text: '提示：' + it.cue }) : null,
+        it.meaning_zh && state.settings.showZh ? h('p', { class: 'small muted', text: it.meaning_zh }) : null);
+    }
+    if (it.form === 'upgrade') {
+      return h('div', { class: 'item-sum' },
+        h('p', { class: 'fix-line' }, h('span', { class: 'tag tag-plain', text: '普通' }), h('span', { class: 'en', text: it.original })),
+        h('p', { class: 'fix-line' }, h('span', { class: 'tag tag-good', text: '更好' }), h('span', { class: 'en', text: it.corrected }), speakBtn(it.corrected)),
+        it.why_zh ? h('p', { class: 'small muted', text: it.why_zh }) : null,
+        h('div', { class: 'chips' }, h('span', { class: 'chip chip-primary', text: '说法升级' })));
+    }
     if (it.kind === 'fix') {
       return h('div', { class: 'item-sum' },
         h('p', { class: 'fix-line' }, h('span', { class: 'tag tag-bad', text: '原句' }), h('span', { class: 'en', text: it.original })),
@@ -254,6 +276,20 @@
   }
 
   function editorFields(it) {
+    if (it.form === 'sentence') {
+      return [
+        { key: 'term', label: '关键句', type: 'textarea', rows: 3, required: true, value: it.term },
+        { key: 'cue', label: '提示（复习时当题目）', value: it.cue, hint: '用英文写这句话在讲什么，不要直接翻译' },
+        { key: 'meaning_zh', label: '中文意思（可以空着）', value: it.meaning_zh }
+      ];
+    }
+    if (it.form === 'upgrade') {
+      return [
+        { key: 'original', label: '普通说法', type: 'textarea', required: true, value: it.original },
+        { key: 'corrected', label: '更好的说法', type: 'textarea', required: true, value: it.corrected },
+        { key: 'why_zh', label: '为什么更好（中文）', type: 'textarea', value: it.why_zh }
+      ];
+    }
     if (it.kind === 'fix') {
       return [
         { key: 'original', label: '你当时说', type: 'textarea', required: true, value: it.original },
@@ -374,6 +410,7 @@
         h('p', { class: 'sub', text: '说出来，才算学会。' })),
       installHint(),
       focusCard(now, hasItems),
+      storiesTodayCard(now),
       h('div', { class: 'grid-2' }, targetsCard(), latestCard(C.latestPack(state))),
       progressCard(now));
   };
@@ -576,9 +613,17 @@
     const pct = s.total ? Math.round(100 * s.done / s.total) : 0;
     const card = h('div', { class: 'card recall' });
     add(card, h('div', { class: 'card-head' },
-      h('p', { class: 'eyebrow', text: { vocab: '单词回忆', expr: '表达回忆', fix: '纠错重说' }[k] }),
+      h('p', { class: 'eyebrow', text: item.form === 'sentence' ? '关键句回忆' : item.form === 'upgrade' ? '说法升级' : { vocab: '单词回忆', expr: '表达回忆', fix: '纠错重说' }[k] }),
       item.srs.state === 'new' ? h('span', { class: 'chip chip-accent', text: '新' }) : s.extra ? h('span', { class: 'chip', text: '加练' }) : null));
-    if (k === 'fix') {
+    if (item.form === 'sentence') {
+      add(card,
+        h('p', { class: 'instruction', text: '看提示，大声说出这句话。用自己的话说对意思也行，揭晓后再对照。' }),
+        h('p', { class: 'prompt en', text: item.cue || item.meaning_zh || '（没有提示，直接揭晓吧）' }));
+    } else if (item.form === 'upgrade') {
+      add(card,
+        h('p', { class: 'instruction', text: '把这句换成更准确、更地道的说法，大声说出来。' }),
+        h('p', { class: 'prompt prompt-fix en', text: item.original }));
+    } else if (k === 'fix') {
       add(card,
         h('p', { class: 'instruction', text: '这句话哪里不对？大声说出正确的说法。' }),
         h('p', { class: 'prompt prompt-fix en', text: item.original }),
@@ -676,6 +721,16 @@
     if (device.autoSpeak) say(item.kind === 'fix' ? item.corrected : item.term);
   }
   function answerBox(item) {
+    if (item.form === 'sentence') {
+      return h('div', { class: 'answer' },
+        h('div', { class: 'answer-line' }, h('span', { class: 'tag tag-star', text: '关键句' }), h('span', { class: 'en grow', text: item.term }), speakBtn(item.term)),
+        item.meaning_zh && state.settings.showZh ? h('p', { class: 'small muted', text: item.meaning_zh }) : null);
+    }
+    if (item.form === 'upgrade') {
+      return h('div', { class: 'answer' },
+        h('div', { class: 'answer-line' }, h('span', { class: 'tag tag-good', text: '更好' }), h('span', { class: 'en grow', text: item.corrected }), speakBtn(item.corrected)),
+        item.why_zh ? h('p', { class: 'small muted', text: item.why_zh }) : null);
+    }
     if (item.kind === 'fix') {
       return h('div', { class: 'answer' },
         h('div', { class: 'answer-line' }, h('span', { class: 'tag tag-good', text: '改正' }), h('span', { class: 'en grow', text: item.corrected }), speakBtn(item.corrected)),
@@ -781,6 +836,7 @@
       h('button', { class: 'btn btn-sm', type: 'button', onclick: () => copyText(P.START_CONVERSATION_COMMAND, '已复制开场白') }, '复制开场白'),
       h('button', { class: 'btn btn-sm', type: 'button', onclick: () => copyText(P.configuredPackCommand(), '已复制生成 Pack 指令') }, '复制生成 Pack'),
       h('button', { class: 'btn btn-sm', type: 'button', onclick: () => copyText(P.standalonePackRequest(Date.now()), '已复制独立 Pack 请求') }, '复制独立 Pack'),
+      h('button', { class: 'btn btn-sm', type: 'button', onclick: () => copyText(P.convertRecapRequest(Date.now()), '已复制转换请求：发到 ChatGPT 写复盘的那个对话里') }, '复制转换请求'),
       h('button', { class: 'btn btn-sm btn-ghost', type: 'button', onclick: () => copyText(P.repairPackRequest(Date.now()), '已复制修复请求') }, '复制修复请求'));
   }
 
@@ -883,6 +939,9 @@
     const dups = C.findDuplicates(state, res.items);
     ui.draft = {
       pack: res.pack,
+      story: res.story || null,
+      _storyDecision: 'keep',
+      _storyDup: res.story ? C.findStoryDuplicate(state, res.story, res.pack.date) : null,
       warnings: res.warnings || [],
       items: res.items.map((it, i) => Object.assign({}, it, { _key: 'c' + i, _decision: dups[i] ? 'skip' : 'active', _dup: dups[i] || null }))
     };
@@ -907,7 +966,13 @@
       type: 'date', class: 'input', id: 'draft-date', fk: 'draft-date', value: d.pack.date,
       onchange: e => { if (C.isDateKey(e.target.value)) { d.pack.date = e.target.value; render(); } }
     });
-    const groups = [['vocab', '单词'], ['expr', '表达'], ['fix', '纠错']];
+    const groups = [
+      ['vocab', '单词', i => i.kind === 'vocab'],
+      ['expr', '表达', i => i.kind === 'expr' && i.form !== 'sentence'],
+      ['sentence', '关键句', i => i.form === 'sentence'],
+      ['fix', '纠错', i => i.kind === 'fix' && i.form !== 'upgrade'],
+      ['upgrade', '说法升级', i => i.form === 'upgrade']
+    ];
     return h('section', { class: 'page' },
       h('button', { class: 'btn btn-sm btn-ghost back', type: 'button', onclick: () => { ui.draft = null; render(); } }, icon('left', 16), '返回修改'),
       pageHead('确认导入', d.pack.title, 'AI 负责提出候选，留不留由你决定。'),
@@ -929,8 +994,9 @@
         h('span', { class: 'small muted grow', text: '复习 = 进入间隔复习 · 收藏 = 只放进素材库 · 不要 = 不保存' }),
         h('button', { class: 'btn btn-sm', type: 'button', onclick: () => setAllDecisions('active') }, '全部复习'),
         h('button', { class: 'btn btn-sm', type: 'button', onclick: () => setAllDecisions('saved') }, '全部收藏')),
-      groups.map(([k, label]) => {
-        const list = d.items.filter(i => i.kind === k);
+      d.story ? storyCandidateCard(d) : null,
+      groups.map(([k, label, test]) => {
+        const list = d.items.filter(test);
         if (!list.length) return null;
         return h('div', { class: 'stack' },
           h('h2', { class: 'section-title' }, label, h('span', { class: 'count', text: String(list.length) })),
@@ -985,7 +1051,7 @@
     saveState();
     scheduleSync(1000);
     Store.persist();
-    toast('已导入：' + res.active + ' 条进入复习' + (res.saved ? '，' + res.saved + ' 条收藏' : ''));
+    toast('已导入：' + res.active + ' 条进入复习' + (res.saved ? '，' + res.saved + ' 条收藏' : '') + (res.storyId ? '，故事已放进「听力」' : ''));
     go('pack/' + encodeURIComponent(res.packId));
   }
 
@@ -1039,7 +1105,13 @@
     }
     const revs = C.packsOnDate(state, p.date);
     const items = C.packItems(state, p.id);
-    const groups = [['vocab', '单词'], ['expr', '表达'], ['fix', '纠错']];
+    const groups = [
+      ['vocab', '单词', i => i.kind === 'vocab'],
+      ['expr', '表达', i => i.kind === 'expr' && i.form !== 'sentence'],
+      ['sentence', '关键句', i => i.form === 'sentence'],
+      ['fix', '纠错', i => i.kind === 'fix' && i.form !== 'upgrade'],
+      ['upgrade', '说法升级', i => i.form === 'upgrade']
+    ];
     const hasInfo = p.summary_zh || p.topics.length || p.scores || p.minutes;
     return h('section', { class: 'page' },
       back,
@@ -1048,14 +1120,15 @@
         class: 'tab', href: '#/pack/' + encodeURIComponent(r.id), 'aria-current': r.id === p.id ? 'page' : null,
         'aria-pressed': String(r.id === p.id), style: { display: 'inline-flex', alignItems: 'center', textDecoration: 'none' }
       }, '第 ' + r.revision + ' 版'))) : null,
+      packStoryCard(p),
       hasInfo ? h('div', { class: 'card' },
         p.summary_zh ? h('p', { text: p.summary_zh }) : null,
         (p.topics.length || p.minutes) ? h('div', { class: 'chips' },
           p.minutes ? h('span', { class: 'chip chip-primary', text: '开口约 ' + p.minutes + ' 分钟' }) : null,
           p.topics.map(t => h('span', { class: 'chip', text: '#' + t }))) : null,
         p.scores ? scoreBars(p.scores) : null) : null,
-      groups.map(([k, label]) => {
-        const list = items.filter(i => i.kind === k);
+      groups.map(([k, label, test]) => {
+        const list = items.filter(test);
         if (!list.length) return null;
         return h('div', { class: 'card' },
           h('h2', { class: 'section-title' }, label, h('span', { class: 'count', text: String(list.length) })),
@@ -1091,9 +1164,23 @@
   function packMarkdown(p, items) {
     const L = ['## ' + p.date + ' ' + p.title, ''];
     if (p.summary_zh) L.push(p.summary_zh, '');
+    const story = p.storyId && state.stories ? state.stories[p.storyId] : null;
+    if (story && story.status !== 'removed') L.push(storyMarkdown(story), '');
     const v = items.filter(i => i.kind === 'vocab');
-    const e = items.filter(i => i.kind === 'expr');
-    const f = items.filter(i => i.kind === 'fix');
+    const e = items.filter(i => i.kind === 'expr' && i.form !== 'sentence');
+    const f = items.filter(i => i.kind === 'fix' && i.form !== 'upgrade');
+    const ks = items.filter(i => i.form === 'sentence');
+    const up = items.filter(i => i.form === 'upgrade');
+    if (ks.length) {
+      L.push('### 关键句');
+      ks.forEach(i => L.push('- ' + i.term + (i.cue ? '（' + i.cue + '）' : '')));
+      L.push('');
+    }
+    if (up.length) {
+      L.push('### 说法升级');
+      up.forEach(i => L.push('- ' + i.original + ' → **' + i.corrected + '**' + (i.why_zh ? '（' + i.why_zh + '）' : '')));
+      L.push('');
+    }
     if (v.length) {
       L.push('### 单词');
       v.forEach(i => L.push('- **' + i.term + '**' + (i.pos ? ' *' + i.pos + '*' : '') + (i.meaning_en ? '：' + i.meaning_en : '') +
@@ -1126,13 +1213,17 @@
   // ---------- 素材库 ----------
   VIEWS.library = function () {
     const lib = C.libraryStats(state, Date.now());
-    const kinds = [['vocab', '单词', lib.byKind.vocab.all], ['expr', '表达', lib.byKind.expr.all], ['fix', '纠错', lib.byKind.fix.all], ['win', '亮点', lib.wins]];
+    const kinds = [['vocab', '单词', lib.byKind.vocab.all], ['expr', '表达', lib.byKind.expr.all], ['fix', '纠错', lib.byKind.fix.all], ['story', '故事', lib.stories], ['win', '亮点', lib.wins]];
     const page = h('section', { class: 'page' },
       pageHead('Library', '素材库', '导入过的全部内容。可以编辑、移出复习或删除。'),
       h('div', { class: 'tabs', role: 'group', 'aria-label': '素材类型' }, kinds.map(([k, label, n]) => h('button', {
         class: 'tab', type: 'button', 'aria-pressed': String(ui.libKind === k), fk: 'lib-' + k,
         onclick: () => { ui.libKind = k; render(); }
       }, label + ' ' + n))));
+    if (ui.libKind === 'story') {
+      add(page, storyList(C.activeStories(state), '还没有故事。新版 ChatGPT 指令生成的 Pack 会自带一篇故事；已经写好的复盘可以用「复制转换请求」转过来。'));
+      return page;
+    }
     if (ui.libKind === 'win') {
       const wins = [];
       for (const g of C.packsByDate(state)) for (const w of g.revisions[0].went_well || []) wins.push(Object.assign({ date: g.date }, w));
@@ -1423,6 +1514,545 @@
         h('h2', { class: 'section-title', text: '手机和电脑一起用' }),
         h('p', { class: 'small', text: '在「设置 → 同步」里填 GitHub 私有仓库，两边就能用同一份数据。不开同步也能用，记得定期导出备份。' })));
   };
+
+  // ---------- 故事与听力 ----------
+  const player = window.SLPlayer.create({ rate: device.rate, getVoice: () => Speech.bestVoice(device.voiceURI) });
+  const RATES = [[0.8, '0.8×'], [0.9, '0.9×'], [1, '1.0×']];
+  const KIND_NAME = { story: '故事', diary: '日记' };
+
+  function storyById(id) {
+    const st = state.stories && state.stories[id];
+    return st && st.status !== 'removed' ? st : null;
+  }
+  function listenRate() { return ui.listen.rate || Math.min(1, Math.max(0.8, Math.round((device.rate || 0.95) * 10) / 10)); }
+  function storyWords(story, version) {
+    return C.storyParagraphs(story, version).reduce((n, p) => n + p.reduce((m, s) => m + C.wordCount(s), 0), 0);
+  }
+  function minutesLabel(words, rate) {
+    const min = words / (150 * (rate || 1));
+    return min < 1 ? '不到 1 分钟' : '约 ' + Math.round(min) + ' 分钟';
+  }
+  function storyPiece(story, version) {
+    const sentences = [];
+    C.storyParagraphs(story, version).forEach(p => sentences.push(...p));
+    return { id: story.id, title: story.title, sentences };
+  }
+  // 开始播放：ctx = { kind: 'story'|'list', ids: [...], version }
+  function startPlayback(ctx, pieceIndex, sentIndex) {
+    const pieces = ctx.ids.map(storyById).filter(Boolean).map(st => storyPiece(st, ctx.version));
+    if (!pieces.length) { toast('没有可以播放的内容'); return; }
+    if (!window.SLPlayer.canSpeak()) { toast('这个浏览器不支持朗读', 'error'); return; }
+    ui.playing = ctx;
+    player.load(pieces, pieceIndex || 0, sentIndex || 0);
+    player.setRate(listenRate());
+    player.setMode(ui.listen.mode);
+    player.setLoop(ctx.kind === 'list' ? ui.listen.loop : !!ctx.loop);
+    player.play();
+  }
+  function isPlayingCtx(kind, id) {
+    const p = ui.playing;
+    if (!p || p.kind !== kind) return false;
+    return kind === 'list' || p.ids[0] === id;
+  }
+
+  // 播放时不整页重绘，只更新高亮和按钮文字
+  function refreshPlayerUi() {
+    const st = player.state();
+    document.querySelectorAll('.sent.now').forEach(e => e.classList.remove('now'));
+    const ctx = ui.playing;
+    if (ctx && st.pieceId) {
+      const el = $main.querySelector('.sent[data-story="' + CSS.escape(st.pieceId) + '"][data-ver="' + ctx.version + '"][data-si="' + st.sent + '"]');
+      if (el) {
+        el.classList.add('now');
+        if (st.playing && ui.listen.follow && !ui.walk) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      }
+    }
+    const label = st.playing ? (st.waiting && st.mode === 'shadow' ? '跟着说…' : '暂停') : (st.stalled ? '点一下继续' : '播放');
+    document.querySelectorAll('[data-np="toggle"]').forEach(b => {
+      b.replaceChildren(icon(st.playing ? 'pause' : 'play', 20), document.createTextNode(label));
+      b.setAttribute('aria-label', label);
+    });
+    const where = st.pieces ? (st.pieces > 1 ? '第 ' + (st.piece + 1) + '/' + st.pieces + ' 篇 · ' : '') + '第 ' + (st.sent + 1) + '/' + st.total + ' 句' : '';
+    document.querySelectorAll('[data-np="title"]').forEach(e => { e.textContent = st.title || '还没开始'; });
+    document.querySelectorAll('[data-np="where"]').forEach(e => { e.textContent = st.pieceId ? where : ''; });
+    const hide = st.mode === 'blind' && !ui.revealText;
+    document.querySelectorAll('[data-np="text"]').forEach(e => {
+      e.textContent = !st.pieceId ? '' : hide ? '（盲听中，文字已隐藏）' : st.text;
+      e.classList.toggle('muted', hide);
+    });
+    document.querySelectorAll('[data-np="stalled"]').forEach(e => e.classList.toggle('hidden', !st.stalled));
+  }
+  player.on((type, snap) => {
+    if (type === 'pieceEnd' && snap.pieceId) {
+      const st = state.stories[snap.pieceId];
+      if (st) {
+        st.listens = (st.listens || 0) + 1;
+        st.updatedAt = Date.now();
+        C.recordActivity(state, device.deviceId, C.dateKey(Date.now()), 'l', 1);
+        saveState();
+        scheduleSync(30000);
+      }
+    }
+    if (type === 'end' && ui.walk && !player.state().loop) toast('播放完了');
+    refreshPlayerUi();
+  });
+
+  function seg(name, options, value, onPick) {
+    return h('div', { class: 'seg', role: 'group', 'aria-label': name },
+      options.map(([v, label]) => h('button', {
+        type: 'button', 'aria-pressed': String(value === v), fk: name + '-' + v,
+        onclick: () => onPick(v)
+      }, label)));
+  }
+  // 播放条：标题 + 上一句/播放/下一句。sticky 时只留这些，选项放在 playerOptions 里
+  function playerControls(opts) {
+    const o = opts || {};
+    return h('div', { class: 'player-bar' + (o.sticky ? ' player-sticky' : '') },
+      h('div', { class: 'np-line' },
+        h('div', { class: 'grow' },
+          h('p', { class: 'np-title', 'data-np': 'title' }),
+          h('p', { class: 'tiny muted', 'data-np': 'where' })),
+        h('button', { class: 'btn btn-sm btn-ghost', type: 'button', onclick: enterWalkMode }, icon('moon', 16), '散步模式')),
+      o.showText ? h('p', { class: 'np-text en', 'data-np': 'text', 'aria-live': 'off' }) : null,
+      h('p', { class: 'small hidden', 'data-np': 'stalled', style: { color: 'var(--warn)' }, text: '手机暂停了朗读，点「点一下继续」接着播。' }),
+      h('div', { class: 'np-controls' },
+        h('button', { class: 'icon-btn icon-btn-lg', type: 'button', title: '上一句', 'aria-label': '上一句', onclick: () => player.prev() }, icon('skip-back', 22)),
+        h('button', { class: 'btn btn-primary np-toggle', type: 'button', 'data-np': 'toggle', onclick: o.onToggle }, icon('play', 20), '播放'),
+        h('button', { class: 'icon-btn icon-btn-lg', type: 'button', title: '下一句', 'aria-label': '下一句', onclick: () => player.next() }, icon('skip-forward', 22))),
+      o.sticky ? null : playerOptions(o));
+  }
+  function playerOptions(opts) {
+    const o = opts || {};
+    return h('div', { class: 'stack' },
+      h('div', { class: 'np-options' },
+        seg('方式', [['read', '连读'], ['blind', '盲听'], ['shadow', '跟读']], ui.listen.mode, v => {
+          ui.listen.mode = v; ui.revealText = false; player.setMode(v); render();
+        }),
+        seg('语速', RATES, listenRate(), v => { ui.listen.rate = v; player.setRate(v); render(); }),
+        o.loopToggle ? h('label', { class: 'check check-inline', for: 'loop-' + o.loopToggle },
+          h('input', {
+            type: 'checkbox', id: 'loop-' + o.loopToggle, fk: 'loop-' + o.loopToggle, checked: o.loopValue,
+            onchange: e => o.onLoop(e.target.checked)
+          }), h('span', { text: '循环' })) : null),
+      h('p', { class: 'tiny muted', text: modeHint(ui.listen.mode) }));
+  }
+  function modeHint(mode) {
+    if (mode === 'blind') return '盲听：先不看文字只听，听完再点「显示文字」对照。';
+    if (mode === 'shadow') return '跟读：每句读完会停几秒，你跟着说一遍。';
+    return '连读：一句接一句读下去。点任意一句，从那句开始。';
+  }
+
+  // 散步模式：保持亮屏、全黑界面、双击才响应，放在口袋里不容易误触
+  let walkEl = null;
+  async function enterWalkMode() {
+    if (!ui.playing) { toast('先开始播放，再进入散步模式'); return; }
+    ui.walk = true;
+    const awake = await window.SLPlayer.keepAwake(true);
+    const doubleTap = fn => {
+      let last = 0;
+      return e => {
+        e.preventDefault();
+        const t = Date.now();
+        if (t - last < 450) { last = 0; fn(); } else last = t;
+      };
+    };
+    const toggle = () => {
+      const st = player.state();
+      if (st.playing) player.pause();
+      else if (st.pieceId) player.play();
+    };
+    walkEl = h('div', { class: 'walk', role: 'dialog', 'aria-modal': 'true', 'aria-label': '散步模式' },
+      h('div', { class: 'walk-top' },
+        h('p', { class: 'walk-title', 'data-np': 'title' }),
+        h('p', { class: 'walk-where', 'data-np': 'where' })),
+      h('button', { class: 'walk-main', type: 'button', 'aria-label': '双击暂停或继续', ondblclick: e => e.preventDefault(), onclick: doubleTap(toggle) },
+        h('span', { class: 'walk-state', 'data-np': 'toggle' }),
+        h('span', { class: 'walk-hint', text: '双击：暂停 / 继续' })),
+      h('p', { class: 'walk-text en', 'data-np': 'text' }),
+      h('p', { class: 'walk-note hidden', 'data-np': 'stalled', text: '手机暂停了朗读，双击上面的按钮接着播。' }),
+      awake ? null : h('p', { class: 'walk-note', text: '这台设备没能保持亮屏。可以先到「设置 → 显示与亮度 → 自动锁定」改成「永不」，散步回来再改回去。' }),
+      h('div', { class: 'walk-bottom' },
+        h('button', { class: 'walk-btn', type: 'button', onclick: doubleTap(() => player.nextPiece()) }, '双击：下一篇'),
+        h('button', { class: 'walk-btn', type: 'button', onclick: doubleTap(exitWalkMode) }, '双击：退出')));
+    walkEl.addEventListener('keydown', e => { if (e.key === 'Escape') exitWalkMode(); });
+    document.body.appendChild(walkEl);
+    document.body.classList.add('walking');
+    refreshPlayerUi();
+    walkEl.querySelector('.walk-main').focus();
+  }
+  function exitWalkMode() {
+    ui.walk = false;
+    window.SLPlayer.keepAwake(false);
+    if (walkEl) { walkEl.remove(); walkEl = null; }
+    document.body.classList.remove('walking');
+    render();
+  }
+
+  // 正文：段落 → 可点的句子，当天的表达高亮
+  function appendHighlighted(el, text, terms) {
+    let pos = 0;
+    for (const [a, b] of C.highlightRanges(text, terms)) {
+      if (a > pos) el.appendChild(document.createTextNode(text.slice(pos, a)));
+      el.appendChild(h('mark', { class: 'kw', text: text.slice(a, b) }));
+      pos = b;
+    }
+    if (pos < text.length) el.appendChild(document.createTextNode(text.slice(pos)));
+  }
+  function storyTextBlock(story, version, onTap, blind) {
+    const terms = C.storyTerms(state, story);
+    const wrap = h('div', { class: 'story-text en' + (blind ? ' is-blind' : '') });
+    let si = 0;
+    for (const sents of C.storyParagraphs(story, version)) {
+      const p = h('p', { class: 'story-para' });
+      for (const sent of sents) {
+        const idx = si++;
+        const span = h('span', {
+          class: 'sent', tabindex: '0', title: '从这句开始播放',
+          'data-story': story.id, 'data-ver': version, 'data-si': String(idx),
+          onclick: () => onTap(idx),
+          onkeydown: e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onTap(idx); } }
+        });
+        appendHighlighted(span, sent, terms);
+        p.appendChild(span);
+        p.appendChild(document.createTextNode(' '));
+      }
+      wrap.appendChild(p);
+    }
+    return wrap;
+  }
+  function storyMarkdown(story) {
+    const L = ['### ' + (KIND_NAME[story.kind] || '故事') + '：' + story.title, ''];
+    story.full.forEach(p => L.push(p, ''));
+    if (story.short.length) { L.push('#### 1 分钟版', ''); story.short.forEach(p => L.push(p, '')); }
+    if (story.outline.length) { L.push('#### 提纲'); story.outline.forEach((o, i) => L.push((i + 1) + '. ' + o)); }
+    return L.join('\n').trim();
+  }
+  function storyRow(st, now) {
+    const due = C.storyDueLabel(st, now);
+    return h('a', { class: 'story-row', href: '#/story/' + encodeURIComponent(st.id) },
+      h('div', { class: 'grow' },
+        h('p', { class: 'pack-title', text: st.title }),
+        h('p', { class: 'tiny muted', text: [st.date, KIND_NAME[st.kind], storyWords(st, 'full') + ' 词', st.listens ? '听过 ' + st.listens + ' 遍' : ''].filter(Boolean).join(' · ') })),
+      h('span', { class: due === '今天讲' ? 'chip chip-warn' : 'chip', text: due }));
+  }
+  function storyList(stories, emptyText) {
+    const now = Date.now();
+    return h('div', { class: 'card' }, stories.length
+      ? h('div', { class: 'item-list' }, stories.map(st => storyRow(st, now)))
+      : h('p', { class: 'muted small', text: emptyText }));
+  }
+
+  function storiesTodayCard(now, onListenPage) {
+    const all = C.activeStories(state);
+    if (!all.length) return null;
+    const due = C.storiesDue(state, now);
+    if (onListenPage && !due.length) return null;
+    return h('div', { class: 'card' },
+      h('div', { class: 'card-head' },
+        h('h3', { text: due.length ? '今天要讲的故事' : '散步时听' }),
+        due.length ? h('span', { class: 'chip chip-warn', text: due.length + ' 个' }) : null),
+      due.length
+        ? h('div', { class: 'item-list' }, due.slice(0, 3).map(st => h('div', { class: 'story-row' },
+          h('div', { class: 'grow' },
+            h('p', { class: 'pack-title', text: st.title }),
+            h('p', { class: 'tiny muted', text: '第 ' + (st.retell.reps + 1) + ' 次讲 · ' + (C.retellVersion(st) === 'short' ? '1 分钟版' : '完整版') })),
+          h('a', { class: 'btn btn-sm btn-primary', href: '#/retell/' + encodeURIComponent(st.id) }, '开始讲'))))
+        : h('p', { class: 'small muted', text: '你有 ' + all.length + ' 篇故事和日记，可以连续循环播放。' }),
+      onListenPage ? null : h('a', { class: 'link', href: '#/listen' }, icon('headphones', 16), '去听力页连续播放', icon('right', 16)));
+  }
+
+  function packStoryCard(p) {
+    const st = p.storyId ? storyById(p.storyId) : null;
+    if (!st) return null;
+    const preview = (st.short.length ? st.short : st.full)[0] || '';
+    return h('div', { class: 'card' },
+      h('div', { class: 'card-head' }, h('h3', { text: '这天的' + KIND_NAME[st.kind] }), h('span', { class: 'chip chip-primary', text: storyWords(st, 'full') + ' 词' })),
+      h('p', { class: 'pack-title', text: st.title }),
+      h('p', { class: 'en clamp-3', text: preview }),
+      h('div', { class: 'row' },
+        h('a', { class: 'btn btn-primary', href: '#/story/' + encodeURIComponent(st.id) }, icon('headphones', 18), '听和练'),
+        h('a', { class: 'btn', href: '#/retell/' + encodeURIComponent(st.id) }, '讲一遍')));
+  }
+
+  function storyCandidateCard(d) {
+    const st = d.story;
+    const keep = d._storyDecision !== 'skip';
+    return h('div', { class: 'stack' },
+      h('h2', { class: 'section-title' }, KIND_NAME[st.kind], h('span', { class: 'count', text: storyWords(st, 'full') + ' 词' })),
+      h('div', { class: 'cand story-cand' + (keep ? '' : ' dim') },
+        h('p', { class: 'pack-title', text: st.title }),
+        st.topics.length ? h('div', { class: 'chips' }, st.topics.map(t => h('span', { class: 'chip', text: '#' + t }))) : null,
+        h('details', { open: true },
+          h('summary', { class: 'small', text: '完整版（' + storyWords(st, 'full') + ' 词）' }),
+          h('div', { class: 'story-text en' }, st.full.map(p => h('p', { class: 'story-para', text: p })))),
+        st.short.length ? h('details', {},
+          h('summary', { class: 'small', text: '1 分钟版（' + storyWords(st, 'short') + ' 词）' }),
+          h('div', { class: 'story-text en' }, st.short.map(p => h('p', { class: 'story-para', text: p })))) : null,
+        st.outline.length ? h('details', {},
+          h('summary', { class: 'small', text: '提纲（' + st.outline.length + ' 条）' }),
+          h('ol', { class: 'steps small' }, st.outline.map(o => h('li', { class: 'en', text: o })))) : null,
+        h('p', { class: 'small muted', text: '导入前快速看一遍：删掉你没说过的细节，改掉不准确的说法。' }),
+        d._storyDup ? h('p', { class: 'small', style: { color: 'var(--warn)' }, text: '这一天已有同名的' + KIND_NAME[st.kind] + '，导入后会替换旧的，复述进度保留。' }) : null,
+        h('div', { class: 'item-actions' },
+          seg('怎么处理这篇', [['keep', '保存'], ['skip', '不要']], keep ? 'keep' : 'skip', v => { d._storyDecision = v; render(); }),
+          h('span', { class: 'spacer' }),
+          h('button', { class: 'icon-btn', type: 'button', title: '编辑', 'aria-label': '编辑这篇', onclick: () => editStory(st, true) }, icon('edit', 18)))));
+  }
+
+  async function editStory(st, isDraft) {
+    const data = await formDialog({
+      title: '编辑' + KIND_NAME[st.kind],
+      okText: '保存',
+      fields: [
+        { key: 'title', label: '标题', required: true, value: st.title },
+        { key: 'kind', label: '类型', type: 'select', value: st.kind, options: [['story', '故事（一件事、一个案子）'], ['diary', '日记（当天聊的内容）']] },
+        { key: 'topics', label: '话题（用逗号隔开）', value: st.topics.join(', ') },
+        { key: 'full', label: '完整版（段落之间空一行）', type: 'textarea', rows: 12, required: true, value: st.full.join('\n\n') },
+        { key: 'short', label: '1 分钟版', type: 'textarea', rows: 5, value: st.short.join('\n\n') },
+        { key: 'outline', label: '提纲（一行一条）', type: 'textarea', rows: 6, value: st.outline.join('\n') }
+      ]
+    });
+    if (!data) return;
+    const paras = s => s.split(/\n\s*\n/).map(x => x.replace(/\s+/g, ' ').trim()).filter(Boolean);
+    const target = isDraft ? st : state.stories[st.id];
+    if (!target) return;
+    Object.assign(target, {
+      title: data.title,
+      kind: data.kind === 'diary' ? 'diary' : 'story',
+      topics: data.topics.split(/[,，]/).map(t => t.trim()).filter(Boolean).slice(0, 8),
+      full: paras(data.full),
+      short: paras(data.short),
+      outline: data.outline.split('\n').map(x => x.trim()).filter(Boolean).slice(0, 10)
+    });
+    if (!target.full.length) { toast('完整版不能为空', 'error'); return; }
+    if (isDraft) { render(); return; }
+    target.updatedAt = Date.now();
+    commit();
+    toast('已保存');
+  }
+  function deleteStory(id) {
+    const st = state.stories[id];
+    if (!st || !window.confirm('删除「' + st.title + '」？关键句和表达会留在素材库里。')) return;
+    if (ui.playing && ui.playing.ids.includes(id)) { player.pause(); ui.playing = null; }
+    st.status = 'removed';
+    st.updatedAt = Date.now();
+    saveState();
+    scheduleSync();
+    toast('已删除');
+    go('listen');
+  }
+
+  VIEWS.listen = function () {
+    const now = Date.now();
+    const all = C.activeStories(state);
+    const head = pageHead('Listen', '听力', '散步时循环播放你的故事和日记。');
+    if (!all.length) {
+      return h('section', { class: 'page' }, head,
+        h('div', { class: 'card empty' },
+          h('p', { text: '还没有故事或日记。' }),
+          h('p', { class: 'small', text: '用新版 ChatGPT 指令生成的 Pack 会自带一篇第一人称的故事。ChatGPT 已经写好的复盘，可以在导入页点「复制转换请求」，发到那个对话里转成 Pack。' }),
+          h('div', { class: 'row' },
+            h('button', { class: 'btn btn-primary', type: 'button', onclick: () => go('import') }, icon('plus', 18), '导入 Pack'),
+            h('button', { class: 'btn', type: 'button', onclick: loadSample }, '先用示例试试'))));
+    }
+    const topics = [...new Set(all.flatMap(s => s.topics))].slice(0, 8);
+    const f = ui.listen.filter;
+    const inFilter = s => f === 'all' || (f === 'story' || f === 'diary' ? s.kind === f : s.topics.includes(f));
+    const shown = all.filter(inFilter);
+    const chosen = shown.filter(s => !ui.listen.exclude[s.id]);
+    const words = chosen.reduce((n, s) => n + storyWords(s, ui.listen.version), 0);
+    const listCtx = isPlayingCtx('list');
+    const due = C.storiesDue(state, now);
+    return h('section', { class: 'page' }, head,
+      due.length ? storiesTodayCard(now, true) : null,
+      h('div', { class: 'card' },
+        h('h2', { class: 'section-title', text: '连续播放' }),
+        h('div', { class: 'tabs filters', role: 'group', 'aria-label': '按类型或话题筛选' },
+          [['all', '全部'], ['story', '故事'], ['diary', '日记']].concat(topics.map(t => [t, '#' + t])).map(([v, label]) => h('button', {
+            class: 'tab', type: 'button', 'aria-pressed': String(f === v), fk: 'lf-' + v,
+            onclick: () => { ui.listen.filter = v; render(); }
+          }, label))),
+        h('div', { class: 'item-list' }, shown.map(st => h('label', { class: 'check story-check', for: 'pick-' + st.id },
+          h('input', {
+            type: 'checkbox', id: 'pick-' + st.id, fk: 'pick-' + st.id, checked: !ui.listen.exclude[st.id],
+            onchange: e => { if (e.target.checked) delete ui.listen.exclude[st.id]; else ui.listen.exclude[st.id] = true; render(); }
+          }),
+          h('span', { class: 'grow' },
+            h('span', { class: 'pack-title', style: { display: 'block' }, text: st.title }),
+            h('span', { class: 'tiny muted', text: [st.date, KIND_NAME[st.kind], minutesLabel(storyWords(st, ui.listen.version), listenRate())].join(' · ') }))))),
+        h('div', { class: 'np-options' },
+          seg('版本', [['full', '完整版'], ['short', '1 分钟版']], ui.listen.version, v => { ui.listen.version = v; render(); }),
+          h('label', { class: 'check check-inline', for: 'list-loop' },
+            h('input', { type: 'checkbox', id: 'list-loop', fk: 'list-loop', checked: ui.listen.loop, onchange: e => { ui.listen.loop = e.target.checked; if (listCtx) player.setLoop(ui.listen.loop); } }),
+            h('span', { text: '循环播放' }))),
+        h('button', {
+          class: 'btn btn-primary btn-block btn-lg', type: 'button', id: 'play-list', disabled: !chosen.length,
+          onclick: () => startPlayback({ kind: 'list', ids: chosen.map(s => s.id), version: ui.listen.version }, 0, 0)
+        }, icon('play', 20), chosen.length ? '开始连续播放（' + chosen.length + ' 篇，' + minutesLabel(words, listenRate()) + '）' : '先勾选要听的内容')),
+      ui.playing ? h('div', { class: 'card' },
+        playerControls({
+          showText: true, loopToggle: 'np', loopValue: player.state().loop,
+          onLoop: v => { player.setLoop(v); if (ui.playing.kind === 'list') ui.listen.loop = v; },
+          onToggle: () => player.toggle()
+        }),
+        ui.listen.mode === 'blind' ? h('button', { class: 'btn btn-sm', type: 'button', onclick: () => { ui.revealText = !ui.revealText; refreshPlayerUi(); } }, '显示 / 隐藏文字') : null) : null,
+      h('div', { class: 'alert alert-info' },
+        h('p', {}, h('b', { text: '散步时：' }), '开始播放后点「散步模式」，屏幕会保持亮着、变成全黑，双击才响应，放进口袋不容易误触。'),
+        h('p', { text: 'iPhone 锁屏或切到别的 App 时，网页朗读会暂停；回到这个页面会从当前这句接着读。' })),
+      h('h2', { class: 'section-title', text: '全部故事和日记' }),
+      storyList(all, ''));
+  };
+
+  VIEWS.story = function (id) {
+    const st = storyById(id);
+    const back = h('a', { class: 'link back', href: '#/listen' }, icon('left', 16), '听力');
+    if (!st) {
+      return h('section', { class: 'page' }, back, h('h1', { text: '找不到这篇' }),
+        h('div', { class: 'card empty' }, h('p', { text: '它可能已经被删除了。' })));
+    }
+    const now = Date.now();
+    const tab = ui.storyTab === 'short' && !st.short.length ? 'full' : ui.storyTab;
+    const version = tab === 'short' ? 'short' : 'full';
+    const playingHere = isPlayingCtx('story', st.id) && ui.playing.version === version;
+    const blind = ui.listen.mode === 'blind' && !ui.revealText;
+    const tapSentence = idx => {
+      if (playingHere) player.playFrom(0, idx);
+      else startPlayback({ kind: 'story', ids: [st.id], version, loop: ui.storyLoop }, 0, idx);
+    };
+    const toggle = () => {
+      if (isPlayingCtx('story', st.id) && ui.playing.version === version && player.state().pieceId) player.toggle();
+      else startPlayback({ kind: 'story', ids: [st.id], version, loop: ui.storyLoop }, 0, 0);
+    };
+    const pack = st.packId ? state.packs[st.packId] : null;
+    const items = st.packId ? C.packItems(state, st.packId) : [];
+    return h('section', { class: 'page' },
+      back,
+      pageHead(KIND_NAME[st.kind] + ' · ' + st.date, st.title, null),
+      h('div', { class: 'chips' },
+        h('span', { class: C.storyDueLabel(st, now) === '今天讲' ? 'chip chip-warn' : 'chip chip-primary', text: '复述：' + C.storyDueLabel(st, now) }),
+        st.listens ? h('span', { class: 'chip', text: '听过 ' + st.listens + ' 遍' }) : null,
+        st.topics.map(t => h('span', { class: 'chip', text: '#' + t }))),
+      h('div', { class: 'tabs', role: 'group', 'aria-label': '版本' },
+        [['full', '完整版'], ['short', '1 分钟版'], ['outline', '提纲']]
+          .filter(([v]) => (v !== 'short' || st.short.length) && (v !== 'outline' || st.outline.length))
+          .map(([v, label]) => h('button', {
+            class: 'tab', type: 'button', 'aria-pressed': String(tab === v), fk: 'stab-' + v,
+            onclick: () => { ui.storyTab = v; render(); }
+          }, label))),
+      tab === 'outline'
+        ? h('div', { class: 'card' }, h('ol', { class: 'steps' }, st.outline.map(o => h('li', { class: 'en', text: o }))))
+        : h('div', { class: 'card' },
+          playerOptions({
+            loopToggle: 'story', loopValue: !!ui.storyLoop,
+            onLoop: v => { ui.storyLoop = v; if (isPlayingCtx('story', st.id)) player.setLoop(v); }
+          }),
+          storyTextBlock(st, version, tapSentence, blind),
+          blind ? h('button', { class: 'btn btn-sm', type: 'button', onclick: () => { ui.revealText = true; render(); } }, icon('eye', 16), '显示文字') : null,
+          h('p', { class: 'tiny muted', text: '点任意一句，从那句开始读。浅橙色标记是这天学的表达。' })),
+      tab !== 'outline' ? playerControls({ sticky: true, onToggle: toggle }) : null,
+      h('div', { class: 'card' },
+        h('h3', { text: '练到能讲出来' }),
+        h('div', { class: 'row' },
+          h('a', { class: 'btn btn-primary', href: '#/retell/' + encodeURIComponent(st.id) }, '讲一遍'),
+          h('button', {
+            class: 'btn', type: 'button',
+            onclick: () => {
+              ui.retellAudience = (ui.retellAudience || 0) + 1;
+              copyText(P.retellTask(st, C.storyTerms(state, st), ui.retellAudience - 1), '已复制：发给 ChatGPT，开 Live 讲给它听');
+            }
+          }, icon('chat', 18), '讲给 ChatGPT 听')),
+        h('p', { class: 'small muted', text: '「讲给 ChatGPT 听」每次换一个听众：外国朋友、同行、刚认识的人，练习根据对象调整详略。' })),
+      items.length ? h('details', { class: 'card' },
+        h('summary', { class: 'small', style: { cursor: 'pointer', minHeight: '44px', display: 'flex', alignItems: 'center' }, text: '这天的关键句和表达（' + items.length + '）' }),
+        h('div', { class: 'item-list' }, items.map(itemRow))) : null,
+      h('div', { class: 'row' },
+        h('button', { class: 'btn', type: 'button', onclick: () => copyText(storyMarkdown(st), '已复制为 Markdown，可以贴进 Obsidian 当英文日记') }, icon('copy', 18), '复制为 Markdown'),
+        h('button', { class: 'btn', type: 'button', onclick: () => editStory(st, false) }, icon('edit', 18), '编辑'),
+        pack && !pack.deleted ? h('a', { class: 'btn btn-ghost', href: '#/pack/' + encodeURIComponent(pack.id) }, '这天的日报') : null,
+        h('span', { class: 'grow' }),
+        h('button', { class: 'btn btn-danger', type: 'button', onclick: () => deleteStory(st.id) }, icon('trash', 18), '删除')));
+  };
+
+  let retellTimer = null;
+  VIEWS.retell = function (id) {
+    const st = storyById(id);
+    const back = h('a', { class: 'link back', href: '#/story/' + encodeURIComponent(id) }, icon('left', 16), '返回');
+    if (!st) return h('section', { class: 'page' }, back, h('h1', { text: '找不到这篇' }));
+    const version = C.retellVersion(st);
+    const level = C.retellCueLevel(st.retell.step);
+    const terms = C.storyTerms(state, st);
+    if (!ui.retell || ui.retell.id !== id) ui.retell = { id, used: {}, start: 0 };
+    const r = ui.retell;
+    const clock = h('span', { class: 'timer', id: 'retell-clock', text: '0:00' });
+    clearInterval(retellTimer);
+    const tick = () => {
+      const el = document.getElementById('retell-clock');
+      if (!el || !r.start) return;
+      const sec = Math.floor((Date.now() - r.start) / 1000);
+      el.textContent = Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0');
+    };
+    if (r.start) retellTimer = setInterval(tick, 500);
+    const finish = smooth => {
+      clearInterval(retellTimer);
+      const used = Object.keys(r.used).length;
+      C.applyRetell(state, id, smooth, { now: Date.now(), deviceId: device.deviceId });
+      ui.retell = null;
+      commit();
+      const next = C.storyDueLabel(state.stories[id], Date.now());
+      toast((smooth ? '讲得顺，' : '没关系，') + '下次：' + next + (terms.length ? '（这次用上 ' + used + '/' + terms.length + ' 个表达）' : ''));
+      go('story/' + encodeURIComponent(id));
+    };
+    const target = version === 'short' ? '1 分钟版' : '完整版';
+    return h('section', { class: 'page' },
+      back,
+      pageHead('复述 · 第 ' + (st.retell.reps + 1) + ' 次', st.title, '不看原文，用自己的话把' + target + '讲出来。'),
+      h('div', { class: 'card' },
+        h('div', { class: 'card-head' },
+          h('h3', { text: level === 'title' ? '只看标题讲' : '看提纲讲' }),
+          h('span', { class: 'chip', text: level === 'title' ? '提示：只有标题' : level === 'outline' ? '提示：提纲' : '提示：提纲 + 表达' })),
+        level === 'title' || !st.outline.length
+          ? h('p', { class: 'prompt en', text: st.title })
+          : h('ol', { class: 'steps' }, st.outline.map(o => h('li', { class: 'en', text: o }))),
+        level === 'outline+terms' && terms.length ? h('div', { class: 'stack' },
+          h('p', { class: 'small muted', text: '试着用上：' }),
+          h('div', { class: 'chips' }, terms.map(t => h('span', { class: 'chip chip-accent en', text: t })))) : null),
+      h('div', { class: 'card' },
+        h('div', { class: 'row' },
+          h('button', {
+            class: 'btn btn-primary', type: 'button', id: 'retell-start',
+            onclick: () => { r.start = r.start ? 0 : Date.now(); render(); }
+          }, r.start ? '停止计时' : '开始讲，计时'),
+          clock,
+          h('span', { class: 'grow' }),
+          h('button', {
+            class: 'btn btn-ghost', type: 'button',
+            onclick: () => startPlayback({ kind: 'story', ids: [st.id], version, loop: false }, 0, 0)
+          }, icon('headphones', 18), '先听一遍' + target)),
+        h('p', { class: 'tiny muted', text: version === 'short' ? '1 分钟版大约讲 40–60 秒。' : '完整版不用逐字一样，把每个节点讲到就行。' })),
+      terms.length ? h('div', { class: 'card' },
+        h('h3', { text: '讲完勾一下：这次用上了哪些？' }),
+        h('div', { class: 'item-list' }, terms.map((t, i) => h('label', { class: 'check', for: 'used-' + i },
+          h('input', { type: 'checkbox', id: 'used-' + i, fk: 'used-' + i, checked: !!r.used[i], onchange: e => { if (e.target.checked) r.used[i] = true; else delete r.used[i]; } }),
+          h('span', { class: 'en', text: t }))))) : null,
+      h('details', { class: 'card' },
+        h('summary', { class: 'small', style: { cursor: 'pointer', minHeight: '44px', display: 'flex', alignItems: 'center' }, text: '讲完再看：' + target + '原文' }),
+        h('div', { class: 'story-text en' }, (version === 'short' ? st.short : st.full).map(p => h('p', { class: 'story-para', text: p })))),
+      h('div', { class: 'sticky-bar' },
+        h('button', { class: 'btn btn-primary grow', type: 'button', id: 'retell-smooth', onclick: () => finish(true) }, icon('check', 18), '讲得顺'),
+        h('button', { class: 'btn grow', type: 'button', id: 'retell-stuck', onclick: () => finish(false) }, '卡住了')));
+  };
+
+  document.addEventListener('keydown', e => {
+    const name = route().name;
+    if (name !== 'story' && name !== 'listen') return;
+    const t = e.target;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.tagName === 'BUTTON' || t.classList.contains('sent'))) return;
+    if (document.getElementById('dialog').open || !ui.playing) return;
+    if (e.key === ' ') { e.preventDefault(); player.toggle(); }
+    else if (e.key === 'ArrowRight') player.next();
+    else if (e.key === 'ArrowLeft') player.prev();
+  });
 
   // ---------- 启动 ----------
   function registerSW() {

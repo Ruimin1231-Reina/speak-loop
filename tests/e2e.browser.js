@@ -21,6 +21,28 @@ function check(name, ok, detail) { results.push({ name, ok: !!ok, detail }); con
     args: ['--lang=zh-CN', '--no-first-run']
   });
   const page = await browser.newPage();
+  // 无头 Chrome 没有真正的英文声音：换成一个假的朗读引擎，每句 40ms 读完，并记下读过的句子
+  await page.evaluateOnNewDocument(() => {
+    const pending = new Set();
+    window.__spoken = [];
+    const fake = {
+      speaking: false,
+      getVoices: () => [],
+      addEventListener: () => {},
+      speak(u) {
+        const t1 = setTimeout(() => {
+          pending.delete(t1);
+          window.__spoken.push(u.text);
+          if (u.onstart) u.onstart();
+          const t2 = setTimeout(() => { pending.delete(t2); if (u.onend) u.onend(); }, 40);
+          pending.add(t2);
+        }, 10);
+        pending.add(t1);
+      },
+      cancel() { pending.forEach(clearTimeout); pending.clear(); }
+    };
+    Object.defineProperty(window, 'speechSynthesis', { value: fake, configurable: true });
+  });
   const errors = [];
   page.on('pageerror', e => errors.push('pageerror: ' + e.message));
   page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
@@ -46,7 +68,7 @@ function check(name, ok, detail) { results.push({ name, ok: !!ok, detail }); con
       hash: location.hash
     }));
     if (/\bnull\b|undefined|\[object |127\.0\.0\.1/.test(r.body)) strays.push(r.hash + ': ' + (r.body.match(/.{0,30}(\bnull\b|undefined|\[object |127\.0\.0\.1).{0,30}/) || [''])[0]);
-    if (r.navLinks !== 5) strays.push(r.hash + ': nav links = ' + r.navLinks);
+    if (r.navLinks !== 6) strays.push(r.hash + ': nav links = ' + r.navLinks);
     return r.main;
   };
 
@@ -67,21 +89,22 @@ function check(name, ok, detail) { results.push({ name, ok: !!ok, detail }); con
   await clickText('button', '载入示例 Pack');
   const t3 = await text();
   check('示例 Pack 进入确认页', t3.includes('确认导入') && t3.includes('unwind'));
-  const candCount = await page.$$eval('.cand', els => els.length);
-  check('候选条目 9 条', candCount === 9, String(candCount));
+  const candCount = await page.$$eval('.cand:not(.story-cand)', els => els.length);
+  check('候选条目 12 条（含 2 条关键句、1 条说法升级）', candCount === 12, String(candCount));
+  check('确认页有故事卡片', (await page.$$('.story-cand')).length === 1 && t3.includes('A low-key weekend'));
   // 把第一条改成「收藏」，最后一条改成「不要」
   await page.evaluate(() => {
-    const cands = document.querySelectorAll('.cand');
+    const cands = document.querySelectorAll('.cand:not(.story-cand)');
     cands[0].querySelector('[data-v="saved"]').click();
   });
   await sleep(150);
   await page.evaluate(() => {
-    const cands = document.querySelectorAll('.cand');
+    const cands = document.querySelectorAll('.cand:not(.story-cand)');
     cands[cands.length - 1].querySelector('[data-v="skip"]').click();
   });
   await sleep(150);
   const btnText = await page.$eval('#confirm-import', b => b.textContent);
-  check('导入按钮计数更新', btnText.includes('7 条进复习') && btnText.includes('1 条收藏'), btnText);
+  check('导入按钮计数更新', btnText.includes('10 条进复习') && btnText.includes('1 条收藏'), btnText);
   await shot('03-import-preview');
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({ path: `${OUT}/v-03a-import-top.png` });
@@ -111,12 +134,71 @@ function check(name, ok, detail) { results.push({ name, ok: !!ok, detail }); con
   await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
   await sleep(150);
   await page.screenshot({ path: `${OUT}/v-04b-pack-bottom.png` });
+  check('日报里有这天的日记', t4.includes('这天的日记') && t4.includes('A low-key weekend'));
+
+  // 4b. 故事页：逐句播放、点句重听、高亮
+  await clickText('a', '听和练');
+  await sleep(300);
+  const sents = await page.$$eval('.sent', els => els.length);
+  check('故事页把完整版分成 8 句', sents === 8, String(sents));
+  const marks = await page.$$eval('mark.kw', els => els.map(e => e.textContent));
+  check('当天的表达在正文里高亮', marks.includes('low-key') && marks.includes('errands') && marks.includes('nothing fancy'), JSON.stringify(marks));
+  await page.evaluate(() => document.querySelector('.player-bar [data-np="toggle"]').click());
+  await sleep(500);
+  const spoken1 = await page.evaluate(() => window.__spoken.slice());
+  const nowSent = await page.$('.sent.now');
+  check('点播放后一句接一句读，并高亮当前句', spoken1.length >= 2 && spoken1[0].startsWith('Last weekend') && !!nowSent, spoken1.length + ' 句');
+  await page.screenshot({ path: `${OUT}/v-18-story-playing.png` });
+  await page.evaluate(() => document.querySelectorAll('.sent')[4].click());
+  await sleep(150);
+  const lastSpoken = await page.evaluate(() => window.__spoken[window.__spoken.length - 1]);
+  check('点某一句就从那句开始读', lastSpoken.startsWith('I have been meaning to'), lastSpoken);
+  await page.evaluate(() => document.querySelector('.player-bar [data-np="toggle"]').click());
+  await sleep(150);
+  const toggleLabel = await page.$eval('.player-bar [data-np="toggle"]', b => b.textContent);
+  check('可以暂停', toggleLabel.includes('播放'), toggleLabel);
+  await clickText('button', '盲听');
+  check('盲听模式隐藏正文', (await page.$$('.story-text.is-blind')).length === 1);
+  await clickText('button', '连读');
+
+  // 4c. 复述练习：第一次看提纲讲 1 分钟版，讲顺后 2 天后再讲
+  await clickText('a', '讲一遍');
+  await sleep(300);
+  const tr = await text();
+  check('复述页给提纲和要用上的表达', tr.includes('看提纲讲') && tr.includes('1 分钟版') && (await page.$$('ol.steps li')).length === 4, tr.split('\n').slice(0, 6).join(' | '));
+  await page.screenshot({ path: `${OUT}/v-19-retell.png` });
+  await page.evaluate(() => { const c = document.querySelector('#used-0'); if (c) c.click(); });
+  await page.click('#retell-smooth');
+  await sleep(400);
+  check('讲顺后安排 2 天后再讲', (await text()).includes('复述：2天后讲'));
+
+  // 4d. 听力页：连续循环播放 + 散步模式
+  await page.goto(BASE + '#/listen', { waitUntil: 'networkidle0' });
+  await sleep(300);
+  check('听力页列出故事', (await text()).includes('A low-key weekend'));
+  await page.click('#play-list');
+  await sleep(3200);
+  const listens = await page.evaluate(() => Object.values(window.__speakLoop.getState().stories)[0].listens);
+  check('循环播放：听完一遍会记一次', listens >= 1, String(listens));
+  await clickText('button', '散步模式');
+  await sleep(200);
+  check('散步模式全屏', !!(await page.$('.walk')));
+  await page.screenshot({ path: `${OUT}/v-20-walk.png` });
+  await page.evaluate(() => { const b = document.querySelector('.walk-main'); b.click(); b.click(); });
+  await sleep(150);
+  const walkLabel = await page.$eval('.walk-state', e => e.textContent);
+  check('散步模式双击暂停', walkLabel.includes('播放'), walkLabel);
+  await page.evaluate(() => { const b = [...document.querySelectorAll('.walk-btn')].find(x => x.textContent.includes('退出')); b.click(); b.click(); });
+  await sleep(200);
+  check('双击退出散步模式', !(await page.$('.walk')));
+  await page.screenshot({ path: `${OUT}/v-21-listen.png`, fullPage: true });
 
   // 5. 今天页
   await page.goto(BASE + '#/today', { waitUntil: 'networkidle0' });
   await sleep(300);
   const t5 = await text();
-  check('今天页显示待复习数量', /7 条等你说出来/.test(t5), t5.split('\n').slice(0, 8).join(' | '));
+  check('今天页显示待复习数量', /10 条等你说出来/.test(t5), t5.split('\n').slice(0, 8).join(' | '));
+  check('今天页有「散步时听」', t5.includes('散步时听'));
   check('下次用上 3 条', (await page.$$eval('.target-list li', l => l.length)) === 3);
   await shot('05-today-filled');
 
@@ -135,12 +217,13 @@ function check(name, ok, detail) { results.push({ name, ok: !!ok, detail }); con
   await page.click('#rate-1');
   await sleep(200);
   const prog = await page.$eval('.review-top .small', e => e.textContent);
-  check('忘了之后总数 +1', prog.trim() === '1 / 8', prog);
+  check('忘了之后总数 +1', prog.trim() === '1 / 11', prog);
   // 用键盘把剩下的做完：空格揭晓，3 打分
   let guard = 0;
   while ((await page.$('#reveal-btn')) && guard < 30) {
     const kind = await page.$eval('.recall .eyebrow', e => e.textContent);
     if (kind === '纠错重说' && !fs.existsSync(require('path').join(OUT, '09-review-fix.png'))) await shot('09-review-fix');
+    if (kind === '关键句回忆' && !fs.existsSync(require('path').join(OUT, '09b-review-sentence.png'))) await shot('09b-review-sentence');
     await page.keyboard.press('Space');
     await sleep(120);
     await page.keyboard.press(guard % 4 === 0 ? '4' : '3');
@@ -148,7 +231,8 @@ function check(name, ok, detail) { results.push({ name, ok: !!ok, detail }); con
     guard++;
   }
   const t6 = await text();
-  check('复习完成页', t6.includes('复习完成') && t6.includes('这一轮说了 8 次'), t6.split('\n').slice(0, 4).join(' | '));
+  check('复习完成页', t6.includes('复习完成') && t6.includes('这一轮说了 11 次'), t6.split('\n').slice(0, 4).join(' | '));
+  check('复习里出现过关键句卡片', fs.existsSync(require('path').join(OUT, '09b-review-sentence.png')));
   await shot('10-review-summary');
 
   // 7. 素材库
@@ -163,6 +247,9 @@ function check(name, ok, detail) { results.push({ name, ok: !!ok, detail }); con
   check('搜索能过滤', found === 1, String(found));
   await clickText('button', '单词');
   await shot('12-library-vocab');
+  await page.evaluate(() => { const i = document.querySelector('#lib-search'); if (i) { i.value = ''; i.dispatchEvent(new Event('input')); } });
+  await clickText('button', '故事');
+  check('素材库有「故事」分类', (await page.$$('.story-row')).length === 1);
 
   // 8. 设置
   await page.goto(BASE + '#/settings', { waitUntil: 'networkidle0' });
@@ -193,7 +280,7 @@ function check(name, ok, detail) { results.push({ name, ok: !!ok, detail }); con
     const items = Object.values(s.items);
     return { items: items.length, reviewed: items.filter(i => i.srs.reps > 0).length, packs: Object.keys(s.packs).length };
   });
-  check('数据：8 条素材、7 条已复习、1 份日报', st.items === 8 && st.reviewed === 7 && st.packs === 1, JSON.stringify(st));
+  check('数据：11 条素材、10 条已复习、1 份日报', st.items === 11 && st.reviewed === 10 && st.packs === 1, JSON.stringify(st));
   check('今天打卡', t9.includes('今天已打卡'));
   await shot('14-today-after');
 

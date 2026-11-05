@@ -83,7 +83,34 @@
       { sentence: 'We ended up talking for hours.', why_zh: 'ended up 用得自然' }
     ],
     next_targets: ['I have been meaning to ...', 'nothing fancy', 'on weekends'],
-    next_steps_zh: ['下次聊天时选一个目标表达自然用一次']
+    next_steps_zh: ['下次聊天时选一个目标表达自然用一次'],
+    upgrades: [
+      { basic: 'It was very relaxing.', better: 'It was exactly what I needed.', why_zh: '更具体，说出了这件事对你的意义' }
+    ],
+    story: {
+      kind: 'diary',
+      title: 'A low-key weekend',
+      topics: ['daily life', 'weekend'],
+      full: [
+        'Last weekend was pretty low-key. I usually stay at home on weekends, and this time I just went with the flow.',
+        'On Saturday morning I had a few errands to run, so I went to the post office and the supermarket. In the afternoon I took a long walk in the park to unwind.',
+        'I have been meaning to try the new café near my place, so on Sunday I finally went there with a friend. We ended up talking for hours. It was nothing fancy, but it was exactly what I needed.',
+        "To be honest, I've been a bit bored lately, so a quiet weekend with a good conversation really helped."
+      ],
+      short: [
+        'Last weekend was pretty low-key. I ran a few errands, took a long walk to unwind, and finally tried the new café near my place with a friend. We ended up talking for hours. Nothing fancy, but exactly what I needed.'
+      ],
+      outline: [
+        'Low-key weekend → went with the flow',
+        'Saturday: errands → long walk to unwind',
+        'Sunday: the new café with a friend → talked for hours',
+        'Bored lately → a quiet weekend helped'
+      ],
+      key_sentences: [
+        { sentence: 'I have been meaning to try the new café near my place, so on Sunday I finally went there with a friend.', cue: 'A café you had wanted to try for a while' },
+        { sentence: 'We ended up talking for hours.', cue: 'What happened at the café' }
+      ]
+    }
   };
 
   root.SL_SAMPLE_PACK = SAMPLE_PACK;
