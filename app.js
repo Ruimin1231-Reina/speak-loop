@@ -15,6 +15,8 @@
   const add = (el, ...kids) => window.SLUI.append(el, kids);
 
   const APP_VERSION = '1.0.0';
+  // 和 sw.js 的 CACHE 版本号保持一致，方便确认手机上是不是最新版
+  const APP_BUILD = 'v10 · 2026-11-05';
   const $main = document.getElementById('main');
   const $nav = document.getElementById('nav');
   const WEEK = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
@@ -1358,7 +1360,16 @@
             }),
             h('button', { class: 'btn btn-sm', type: 'button', onclick: () => say("It's not as simple as it sounds.") }, icon('speaker', 16), '试听'))),
         checkbox('set-autospeak', '揭晓答案时自动朗读', '', device.autoSpeak, v => { device.autoSpeak = v; saveDevice(); }),
-        Speech.canListen() ? null : h('p', { class: 'small muted', text: '这个浏览器不支持语音识别，复习时不会出现「说出来检查」，其他功能不受影响。' })),
+        Speech.canListen() ? null : h('p', { class: 'small muted', text: '这个浏览器不支持语音识别，复习时不会出现「说出来检查」，其他功能不受影响。' }),
+        h('details', {},
+          h('summary', { class: 'small', style: { cursor: 'pointer', minHeight: '44px', display: 'flex', alignItems: 'center' }, text: '查看这台设备开放给网页的英文声音（' + voices.length + ' 个）' }),
+          voices.length
+            ? h('ol', { class: 'small', style: { margin: '0', paddingLeft: '22px' } }, voices.map(v => {
+              const q = Speech.voiceQuality(v);
+              return h('li', { text: v.name + ' · ' + v.lang + (q.label ? ' · ' + q.label : '') + ' · ' + String(v.voiceURI || '').replace(/^com\.apple\./, '') });
+            }))
+            : h('p', { class: 'small muted', text: '没有读到任何英文声音。' }),
+          h('p', { class: 'small muted', text: '在 iPhone 设置里下载的声音不在这个列表里，就说明 iOS 没有把它开放给网页使用。截图发给我可以帮你判断。' }))),
 
       h('div', { class: 'card' },
         h('h2', { class: 'section-title', text: 'ChatGPT 设置' }),
@@ -1408,7 +1419,7 @@
 
       h('div', { class: 'card' },
         h('h2', { class: 'section-title', text: '关于' }),
-        h('p', { class: 'small muted', text: '口语工作台 Speak Loop ' + APP_VERSION + ' · 数据都在你自己的设备和仓库里，不经过任何第三方服务器。' }),
+        h('p', { class: 'small muted', text: '口语工作台 Speak Loop ' + APP_VERSION + '（' + APP_BUILD + '）· 数据都在你自己的设备和仓库里，不经过任何第三方服务器。' }),
         persistLine));
   };
 
