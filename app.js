@@ -1305,7 +1305,10 @@
       ? h('select', {
         class: 'input', id: 'set-voice', fk: 'set-voice', value: best ? best.voiceURI : '',
         onchange: e => { device.voiceURI = e.target.value; saveDevice(); say("Nice to meet you. Let's practise English together."); }
-      }, voices.map(v => h('option', { value: v.voiceURI, text: v.name + '（' + v.lang + '）' })))
+      }, voices.map((v, i) => {
+        const q = Speech.voiceQuality(v);
+        return h('option', { value: v.voiceURI, text: v.name + '（' + v.lang + '）' + (q.label ? ' · ' + q.label : '') + (i === 0 ? ' · 推荐' : '') });
+      }))
       : h('p', { class: 'small muted', id: 'set-voice', text: Speech.canSpeak() ? '正在读取系统里的英文声音…' : '这个浏览器不支持朗读。' });
 
     const ownerIn = textInput('sync-owner', sy.owner, '你的 GitHub 用户名');
@@ -1345,7 +1348,7 @@
 
       h('div', { class: 'card' },
         h('h2', { class: 'section-title', text: '发音' }),
-        field('set-voice', '英文声音', voiceControl, 'iPhone 可以在「设置 → 辅助功能 → 朗读内容 → 声音 → 英语」里下载更自然的增强版声音，下载后回到这里选。'),
+        field('set-voice', '英文声音', voiceControl, '列表按自然程度排序。iPhone 可以在「设置 → 辅助功能 → 朗读内容 → 声音 → 英语」免费下载名字带「高级」或「增强」的声音（比如 Ava、Zoe），下载后彻底关掉工作台再打开，回到这里选。下载了却不在列表里，说明 iOS 没有把它开放给网页使用。'),
         h('div', { class: 'field' },
           h('label', { for: 'set-rate', text: '语速：' + Number(device.rate).toFixed(2) }),
           h('div', { class: 'row' },

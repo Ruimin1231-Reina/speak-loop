@@ -29,22 +29,39 @@
     else synth.onvoiceschanged = loadVoices;
   }
 
+  // 给声音打分：下载的高级/增强版、浏览器的神经网络声音最自然；Eloquence 和趣味声音最生硬
+  const NOVELTY = /^(albert|bad news|bahh|bells|boing|bubbles|cellos|wobble|fred|good news|jester|junior|kathy|organ|superstar|ralph|trinoids|whisper|zarvox|grandma|grandpa)\b/i;
+  const ELOQUENCE = /^(eddy|flo|reed|rocko|sandy|shelley)\b/i;
+  function voiceQuality(v) {
+    const uri = String(v.voiceURI || '').toLowerCase();
+    const name = String(v.name || '');
+    const both = uri + ' ' + name.toLowerCase();
+    let score = 0;
+    let label = '';
+    if (/premium|高级|優化|高品质/.test(both)) { score += 40; label = '高级'; }
+    else if (/enhanced|增强|增強/.test(both)) { score += 30; label = '增强'; }
+    else if (/\b(natural|neural)\b/.test(both) || /online/i.test(name)) { score += 35; label = '自然'; }
+    if (/eloquence/.test(uri) || ELOQUENCE.test(name)) { score -= 20; label = '较生硬'; }
+    if (NOVELTY.test(name)) { score -= 40; label = '趣味声音'; }
+    if (/google (us|uk) english/i.test(name)) score += 15;
+    if (PREFERRED.test(name)) score += 10;
+    const li = LANG_ORDER.indexOf(langKey(v.lang));
+    score += li === 0 ? 6 : li === 1 ? 5 : li > 1 ? 2 : 0;
+    if (v.localService) score += 1;
+    return { score, label };
+  }
+
   function englishVoices() {
     return voices
       .filter(v => /^en([-_]|$)/i.test(v.lang))
-      .slice()
-      .sort((a, b) => {
-        const la = LANG_ORDER.indexOf(langKey(a.lang));
-        const lb = LANG_ORDER.indexOf(langKey(b.lang));
-        if (la !== lb) return (la === -1 ? 99 : la) - (lb === -1 ? 99 : lb);
-        if (a.localService !== b.localService) return a.localService ? -1 : 1;
-        return a.name.localeCompare(b.name);
-      });
+      .map(v => ({ v, q: voiceQuality(v) }))
+      .sort((a, b) => (b.q.score - a.q.score) || a.v.name.localeCompare(b.v.name))
+      .map(x => x.v);
   }
 
   function bestVoice(uri) {
     const list = englishVoices();
-    return list.find(v => v.voiceURI === uri) || list.find(v => PREFERRED.test(v.name)) || list[0] || null;
+    return list.find(v => v.voiceURI === uri) || list[0] || null;
   }
 
   function canSpeak() { return !!synth && typeof root.SpeechSynthesisUtterance === 'function'; }
@@ -104,5 +121,5 @@
     return function () { try { rec.stop(); } catch (e) { /* ignore */ } };
   }
 
-  root.SLSpeech = { init, englishVoices, bestVoice, canSpeak, speak, canListen, listen };
+  root.SLSpeech = { init, englishVoices, bestVoice, voiceQuality, canSpeak, speak, canListen, listen };
 })(window);
