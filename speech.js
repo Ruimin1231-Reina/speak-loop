@@ -38,8 +38,9 @@
     const both = uri + ' ' + name.toLowerCase();
     let score = 0;
     let label = '';
-    if (/premium|高级|優化|高品质/.test(both)) { score += 40; label = '高级'; }
-    else if (/enhanced|增强|增強/.test(both)) { score += 30; label = '增强'; }
+    // iPhone 中文界面：Premium =「高音质」，Enhanced =「优化音质」
+    if (/premium|高音质|高音質|高级/.test(both)) { score += 40; label = '高音质'; }
+    else if (/enhanced|优化音质|優化音質|增强|增強/.test(both)) { score += 30; label = '优化音质'; }
     else if (/\b(natural|neural)\b/.test(both) || /online/i.test(name)) { score += 35; label = '自然'; }
     if (/eloquence/.test(uri) || ELOQUENCE.test(name)) { score -= 20; label = '较生硬'; }
     if (NOVELTY.test(name)) { score -= 40; label = '趣味声音'; }

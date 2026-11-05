@@ -1348,7 +1348,7 @@
 
       h('div', { class: 'card' },
         h('h2', { class: 'section-title', text: '发音' }),
-        field('set-voice', '英文声音', voiceControl, '列表按自然程度排序。iPhone 可以在「设置 → 辅助功能 → 朗读内容 → 声音 → 英语」免费下载名字带「高级」或「增强」的声音（比如 Ava、Zoe），下载后彻底关掉工作台再打开，回到这里选。下载了却不在列表里，说明 iOS 没有把它开放给网页使用。'),
+        field('set-voice', '英文声音', voiceControl, '列表按自然程度排序。iPhone 可以在「设置 → 辅助功能 → 朗读内容 → 声音 → 英语」免费下载「高音质」（最好）或「优化音质」的声音（比如 Ava、Zoe），下载后彻底关掉工作台再打开，回到这里选。下载了却不在列表里，说明 iOS 没有把它开放给网页使用。'),
         h('div', { class: 'field' },
           h('label', { for: 'set-rate', text: '语速：' + Number(device.rate).toFixed(2) }),
           h('div', { class: 'row' },

@@ -39,8 +39,11 @@ test('没选过声音时自动用最好的；选过的照样用', () => {
 
 test('列表里的标签', () => {
   const label = n => S.voiceQuality(VOICES.find(v => v.name.startsWith(n))).label;
-  assert.equal(label('Ava (Premium)'), '高级');
-  assert.equal(label('Evan'), '增强');
+  assert.equal(label('Ava (Premium)'), '高音质');
+  assert.equal(label('Evan'), '优化音质');
+  // 中文界面下名字是本地化的，也能认出来
+  assert.equal(S.voiceQuality({ name: 'Zoe（高音质）', lang: 'en-US', voiceURI: 'x.Zoe' }).label, '高音质');
+  assert.equal(S.voiceQuality({ name: 'Nathan（优化音质）', lang: 'en-US', voiceURI: 'x.Nathan' }).label, '优化音质');
   assert.equal(label('Microsoft'), '自然');
   assert.equal(label('Eddy'), '较生硬');
   assert.equal(label('Bubbles'), '趣味声音');
